@@ -1,8 +1,18 @@
+import numpy as np
+import logging
+
+from pathlib import Path
 from spikeextractors import RecordingExtractor
 from .readSGLX import readMeta, SampRate, makeMemMapRaw, GainCorrectIM, GainCorrectNI, ExtractDigital
-import numpy as np
-from pathlib import Path
 from spikeextractors.extraction_tools import check_get_traces_args, check_get_ttl_args
+from scipy.interpolate import interp1d
+
+### types for variables in function prototypes
+# https://docs.python.org/3/library/typing.html
+from typing import Union
+intOrNone = Union[int, None]
+
+logger = logging.getLogger('ceciestunepipe.util.spikeextractors.extractors.spikeglxrecordingextractor.spikeglxrecordingextractor')
 
 
 class SpikeGLXRecordingExtractor(RecordingExtractor):
@@ -13,7 +23,14 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
     mode = 'file'
     installation_mesg = "To use the SpikeGLXRecordingExtractor run:\n\n pip install mtscomp\n\n"  # error message when not installed
 
-    def __init__(self, file_path: str, dtype: str = 'int16'):
+    _ttl_events = None # The ttl events
+    _t_0 = None
+    _t_prime = None
+    _s_f_0 = None
+    _syn_chan_id = None
+    _dig = None
+
+    def __init__(self, file_path: str, dtype: str = 'int16', syn_chan_id=0):
         RecordingExtractor.__init__(self)
         self._npxfile = Path(file_path)
         self._basepath = self._npxfile.parents[0]
@@ -93,6 +110,11 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
         self.set_channel_gains(self._channels, gains*1e6)
         self._kwargs = {'file_path': str(Path(file_path).absolute()), 'dtype': dtype}
 
+        self.set_syn_chan_id(syn_chan_id)
+
+    def set_syn_chan_id(self, syn_chan_id=0):
+        self._syn_chan_id = syn_chan_id
+
     def get_channel_ids(self):
         return self._channels
 
@@ -125,12 +147,13 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
 
     @check_get_ttl_args
     def get_ttl_events(self, start_frame=None, end_frame=None, channel_id=0):
+        logger.info('getting ttl events, chan {}'.format(channel_id))
         channel = [channel_id]
         dw = 0
         dig = ExtractDigital(self._raw, firstSamp=start_frame, lastSamp=end_frame, dwReq=dw, dLineList=channel,
                              meta=self._meta)
-        dig = np.squeeze(dig)
-        diff_dig = np.diff(dig.astype(int))
+        self._dig = np.squeeze(dig).astype(int)
+        diff_dig = np.diff(self._dig)
 
         rising = np.where(diff_dig > 0)[0] + start_frame
         falling = np.where(diff_dig < 0)[0] + start_frame
@@ -138,7 +161,66 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
         ttl_frames = np.concatenate((rising, falling))
         ttl_states = np.array([1] * len(rising) + [-1] * len(falling))
         sort_idxs = np.argsort(ttl_frames)
+
+        self._ttl_events = tuple([ttl_frames[sort_idxs], ttl_states[sort_idxs]])
         return ttl_frames[sort_idxs], ttl_states[sort_idxs]
+
+    def get_effective_sf(self, start_frame: intOrNone=None, end_frame: intOrNone=None, 
+        force_ttl: bool=False) -> tuple:
+        if (self._ttl_events is None) or force_ttl:
+            syn_chan_id = self._syn_chan_id
+            self.get_ttl_events(start_frame, end_frame, syn_chan_id)
+        
+        syn_ttl = self._ttl_events
+        s_f_arr = compute_sf(syn_ttl)
+
+        n_samples = self.get_traces().shape[-1]
+
+        self._s_f_0 = np.mean(s_f_arr)
+        self._t_0 = np.arange(n_samples)/self._s_f_0
+
+        return self._s_f_0, self._t_0, self._ttl_events
+
+    def syn_to_pattern(self, t_0_pattern: np.array, ttl_edge_tuple_pattern: tuple,
+     force_ttl: bool=False) -> tuple:
+
+        # get the times from the pattern signal corresponding to the samples right at the edges
+        # those have to be the exact ones in the t prime of the current stream
+        # anything in between will be a pieceweise linearly interpolated time
+        
+        #get t0, sampling rate and ttl edges of the current stream
+        s_f_0, t_0, ttl_edge_tuple = self.get_effective_sf(force_ttl = force_ttl)
+        
+        # check the number of edges, they should match
+        n_edges = ttl_edge_tuple[0].size
+        n_edges_pattern = ttl_edge_tuple_pattern[0].size
+        if n_edges != n_edges_pattern:
+            # If the signals don't have the same number of edges there may be an error, better stop and debug
+            raise ValueError('Number of edges in the syn ttl events of pattern and target dont match')
+        
+        # the 'actual' times at the edges of the syn signal
+        t_pattern_edge = t_0_pattern[ttl_edge_tuple_pattern[0]]
+        # the interpolation function. fill_value='extrapolate' allows extrapolation from zero and until the last time stamp
+        # careful, this could lead to negative time, but it is the correct way to do it.
+        t_interp_f = interp1d(ttl_edge_tuple[0], t_pattern_edge, 
+                      assume_sorted=True, fill_value='extrapolate')
+
+        n_samples = t_0.size
+        t_prime = t_interp_f(np.arange(n_samples))
+        self._t_prime = t_prime
+        return t_prime
+
+    def read_tprime(self):
+        return self._t_prime
+
+    def syn_to_sgl_rec_exctractor(self, extractor_pattern: RecordingExtractor, force_ttl: bool=False):
+        
+        # get the pattern ttl edges and t at them
+        s_f_pattern, t_pattern, ttl_edge_tuple_pattern = extractor_pattern.get_effective_sf(force_ttl=force_ttl)
+
+        # sync the tprime of this object to the pattern
+        self.syn_to_pattern(t_pattern, ttl_edge_tuple_pattern, force_ttl=force_ttl)
+
 
     # def get_syn_events(self, start_frame=None, end_frame=None, channel_id=0):
     #     # SYN is in one of the digital channels in the nidaq, or 
@@ -180,3 +262,12 @@ def _parse_spikeglx_metafile(metafile):
                         y_pos = int(chan.split(':')[2])
                         locations.append([x_pos*x_pitch, y_pos*y_pitch])
     return tot_channels, ap_channels, lfp_channels, locations
+
+
+def compute_sf(ttl: tuple) -> np.array:
+    ttl_arr = np.array(ttl)
+    
+    # get all the diffs betwenn edge ups and edge donws
+    all_diff_arr = np.concatenate([np.diff(ttl_arr[0, ttl_arr[1]==j]) for j in [-1, 1]])
+    
+    return all_diff_arr
