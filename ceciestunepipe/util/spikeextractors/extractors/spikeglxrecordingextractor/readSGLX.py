@@ -285,14 +285,15 @@ def extract_imec_syn_ch(raw_data: np.array, first_samp:int, last_samp:int, meta_
     ## extract the 
         n_ap, n_lf, n_sy = ChannelCountsIM(meta_dict)
         dig_array = np.zeros(last_samp - first_samp, dtype='uint8')
+        logger.info('allocated array for syn channel of size {}'.format(dig_array.shape))
         if n_sy == 0:
             logger.info("No imec sync channel saved.")
         else:
             i_dig_ch = n_ap + n_lf
-            ttl_stream = raw_data[i_dig_ch, first_samp:last_samp]
-            ttl_thresh = np.mean(ttl_stream)
-            logger.info('Thresholf for logical hi is {}'.format(ttl_thresh))
-            dig_array[ttl_stream > ttl_thresh] = 1
+            #ttl_stream = raw_data[i_dig_ch, first_samp:last_samp]
+            ttl_thresh = np.mean(raw_data[i_dig_ch, first_samp:last_samp])
+            logger.info('Threshold for logical hi is {}'.format(ttl_thresh))
+            dig_array[raw_data[i_dig_ch, first_samp:last_samp] > ttl_thresh] = 1
         return dig_array
 
 

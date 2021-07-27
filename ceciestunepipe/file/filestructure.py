@@ -26,15 +26,20 @@ locations_dict['lookfar'] = {'mnt': os.path.abspath('/Volumes/Samsung_X5/microdr
 #                              'fast': os.path.abspath('/Data/scratch')
 #                              }
 
-locations_dict['passaro']= {'mnt': os.path.abspath('/mnt/cube/earneodo/bci_zf/neuropix/birds'),
+locations_dict['passaro']= {'mnt': os.path.abspath('/mnt/cube/earneodo/basalganglia/birds'),
                              'local': os.path.abspath('/Data/raw_data'),
                              'fast': os.path.abspath('/mnt/cube/earneodo/scratch')
+                             }
+
+locations_dict['txori']= {'mnt': os.path.abspath('/mnt/sphere/speech_bci/'),
+                             'local': os.path.abspath('/scratch/earneodo'),
+                             'fast': os.path.abspath('/scratch/earneodo')
                              }
 
 
 locations_dict['pakhi']= {'mnt': os.path.abspath('/mnt/cube/earneodo/bci_zf/neuropix/birds'),
                              'local': os.path.abspath('/mnt/sphere/earneodo/bci_zf/ss_data'),
-                             'fast': os.path.abspath('/mnt/sphere/earneodo/scratch')
+                             'fast': os.path.abspath('/scratch/earneodo/tmp')
                              }
 
 
@@ -131,8 +136,23 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
                     ['dat_mic.mat', 'dat_ap.mat', 'dat_all.pkl']):
         exp_struct['files'][f] = os.path.join(exp_struct['folders']['processed'], n)
 
+    # the 'derived' system (wav_mic, ...)
+    exp_struct['folders']['derived'] = os.path.join(
+        location['mnt'], bird, ephys_folder, 'derived', sess)
+    for f, n in zip(['wav_mic'], ['wav_mic.wav']):
+        exp_struct['files'][f] = os.path.join(exp_struct['folders']['derived'], n)
+
     # the aux, temporary mountainsort files. these will be deleted after sorting
     # try 'fast' location first, if it does not exist, go for 'local'
+    try:
+        exp_struct['folders']['tmp'] = os.path.join(location['fast'], 'tmp')
+    except KeyError:
+        exp_struct['folders']['tmp'] = os.path.join(location['local'], 'tmp')
+    
+     # SET THE TMP DIRECTORY ENVIRONMENT VARIABLEM
+    os.environ["TMPDIR"] = exp_struct['folders']['tmp']
+    os.environ["TMP"] = exp_struct['folders']['tmp']
+
     try:
         msort_location = location['fast']
     except KeyError:
@@ -151,6 +171,8 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     for f, n in zip(['bin_raw', 'par'], ['raw.bin', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['ksort'], n)
+
+   
 
     return exp_struct
 
@@ -192,8 +214,6 @@ def get_rig_par(exp_struct: dict) -> dict:
 def make_all_events(exp_struct: dict) -> dict:
     mic_dat_path = exp_struct['files']['dat_mic']
     
-
-
 
 def get_probe_port(exp_struct: dict, selected_probe: str) -> str:
     # get the probe and the port where the probe was connected
