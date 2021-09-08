@@ -190,6 +190,19 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
             [ttl_frames[sort_idxs], ttl_states[sort_idxs]])
         return ttl_frames[sort_idxs], ttl_states[sort_idxs]
 
+    def get_ttl_traces(self, start_frame=None, end_frame=None, channel_list=range(7)):
+        logger.info('getting ttl traces, chan {}'.format(channel_list))
+        if self._dig is None:
+            # get all of the digital traces
+            dw = 0
+            n_samples = self.get_traces().shape[-1]
+
+            dig = ExtractDigital(self._raw, firstSamp=0, lastSamp=n_samples, dwReq=dw, dLineList=channel_list,
+                             meta=self._meta)
+            self._dig = np.squeeze(dig).astype(np.short)
+        
+        return self._dig
+
     def get_effective_sf(self, start_frame: intOrNone = None, end_frame: intOrNone = None,
                          force_ttl: bool = False) -> tuple:
         if (self._ttl_events is None) or force_ttl:

@@ -298,3 +298,28 @@ def list_ephys_epochs(sess_par: dict, raw_paths=False, location_dict: dict = dic
         return all_sess_folders
     else:
         return list(map(lambda x: os.path.split(x)[-1], all_sess_folders))
+
+def get_sgl_files_epochs(parent_folder, file_filter='*.wav'):
+    sess_files = []
+    for root, subdirs, files in os.walk(parent_folder):
+        for epoch_dir in subdirs:
+            #print(glob.glob(os.path.join(root, epoch_dir, file_filter)))
+            sess_files += list(glob.glob(os.path.join(root, epoch_dir, file_filter)))
+    sess_files.sort()
+    return sess_files
+
+
+def split_path(path:str) -> list:
+    allparts = []
+    while 1:
+        parts = os.path.split(path)
+        if parts[0] == path:  # sentinel for absolute paths
+            allparts.insert(0, parts[0])
+            break
+        elif parts[1] == path: # sentinel for relative paths
+            allparts.insert(0, parts[1])
+            break
+        else:
+            path = parts[0]
+            allparts.insert(0, parts[1])
+    return allparts

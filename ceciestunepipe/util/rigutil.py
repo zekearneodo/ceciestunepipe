@@ -1,7 +1,10 @@
 # tools to read/write the metadata of the rig.
 # mainly, about the rig.json file
 import json
+import logging
+import os
 
+logger = logging.getLogger('ceciestunepipe.util.rigutil')
 '''
 example of a rig_par dictionary:
 rig_par = {'chan': {'ttl': {'trig_perceptron': 'DIN-01', 'trig_recording': 'DIN-00'}, 
@@ -14,10 +17,16 @@ rig_par = {'chan': {'ttl': {'trig_perceptron': 'DIN-01', 'trig_recording': 'DIN-
           }
 '''
 def get_rig_par(exp_struct: dict) -> dict:
-    rig_par_file = exp_struct['files']['rig']
-    with open(rig_par_file, 'r') as fp:
-        rig_par = json.load(fp)
-    return rig_par
+    # if there is a file for the run, get that
+    # otherwise, assume the run gets same rig pars as the whole session
+    try:
+        with open(os.path.join(exp_struct['folders']['sglx'], 'rig.json')) as j_file:
+            rig_dict = json.load(j_file)
+    except FileNotFoundError:
+        logger.debug('rig.json file not found for the run, going for the one for the session')
+        with open(exp_struct['files']['rig']) as j_file:
+            rig_dict = json.load(j_file)           
+    return rig_dict
 
 def lookup_signal(rig_par_dict: dict, signal_name: str) -> tuple:
     chan_dict = rig_par_dict['chan']

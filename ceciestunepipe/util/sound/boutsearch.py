@@ -1,12 +1,15 @@
 import more_itertools as mit
 import peakutils
 import warnings
+import traceback
 import numpy as np
 import pandas as pd
 import logging
 import os
 import glob
 import sys
+
+from tqdm.auto import tqdm
 
 from ceciestunepipe.util.sound import spectral as sp
 from ceciestunepipe.util.sound import temporal as st
@@ -168,6 +171,89 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
     else:
         bout_pd = pd.DataFrame()
     return bout_pd, wav_i, all_p
+  
+
+def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=90000000):
+    # path of the wav_file
+    # h_params from the rosa spectrogram plus the parameters:
+    #     'read_wav_fun': load_couple, # function for loading the wav_like_stream (has to returns fs, ndarray)
+    #     'min_segment': 30, # Minimum length of supra_threshold to consider a 'syllable'
+    #     'min_silence': 200, # Minmum distance between groups of syllables to consider separate bouts
+    #     'bout_lim': 200, # same as min_dinscance !!! Clean that out!
+    #     'min_bout': 250, # min bout duration
+    #     'peak_thresh_rms': 2.5, # threshold (rms) for peak acceptance,
+    #     'thresh_rms': 1 # threshold for detection of syllables
+
+    # Decide and see if it CAN load the power
+    logger.info('Getting bouts for long file {}'.format(file_path))
+    print('tu vieja file {}'.format(file_path))
+    sys.stdout.flush()
+    #logger.debug('s_f {}'.format(s_f))
+    
+    # Get the bouts. If loaded_p is none, it will copute it
+    s_f, wav_i = hparams['read_wav_fun'](file_path)
+
+    n_chunks = int(np.ceil(wav_i.shape[0]/chunk_size))
+    wav_chunks = np.array_split(wav_i, n_chunks)
+    logger.info('splitting file into {} chunks'.format(n_chunks))
+
+    chunk_start_sample = 0
+    bouts_pd_list = []
+    for i_chunk, wav_i in tqdm(enumerate(wav_chunks), total=n_chunks):
+        # get the bouts for a chunk
+        # offset the starts to the beginning of the chunk
+        # recompute the beginning of the next chunk
+        the_bouts, the_p, all_p, all_syl = get_the_bouts(wav_i, hparams, loaded_p=loaded_p)
+        chunk_offset_ms = int(1000 * chunk_start_sample / s_f)
+        
+        # make one bouts pd dataframe for the chunk
+        if the_bouts.size > 0:
+            step_ms = hparams['frame_shift_ms']
+            pk_dist = hparams['min_segment']
+            bout_pd = pd.DataFrame(the_bouts * step_ms + chunk_offset_ms, columns=['start_ms', 'end_ms'])
+            bout_pd['start_sample'] = bout_pd['start_ms'] * (s_f//1000)
+            bout_pd['end_sample'] = bout_pd['end_ms'] * (s_f//1000)
+            
+            bout_pd['p_step'] = the_p
+            # the extrema over the file
+            bout_pd['rms_p'] = st.rms(all_p)
+            bout_pd['peak_p'] = bout_pd['p_step'].apply(np.max)
+            # check whether the peak power is larger than hparams['peak_thresh_rms'] times the rms through the file
+            bout_pd['bout_check'] = bout_pd.apply(lambda row: \
+                                                (row['peak_p'] > hparams['peak_thresh_rms'] * row['rms_p']), 
+                                                axis=1)
+            bout_pd['file'] = file_path
+            bout_pd['len_ms'] = bout_pd.apply(lambda r: r['end_ms'] - r['start_ms'], axis=1)
+            
+            syl_pd = pd.DataFrame(all_syl * step_ms + + chunk_offset_ms, columns=['start_ms', 'end_ms'])
+            bout_pd['syl_in'] = bout_pd.apply(lambda r: \
+                                            syl_pd[(syl_pd['start_ms'] >= r['start_ms']) & \
+                                                    (syl_pd['start_ms'] <= r['end_ms'])].values, 
+                                            axis=1)
+            bout_pd['n_syl'] = bout_pd['syl_in'].apply(len)
+            # get all the peaks larger than the threshold(peak_thresh_rms * rms)
+            bout_pd['peaks_p'] = bout_pd.apply(lambda r: peakutils.indexes(r['p_step'], 
+                                                                        thres=hparams['peak_thresh_rms']*r['rms_p']/r['p_step'].max(),
+                                                                        min_dist=pk_dist//step_ms),
+                                            axis=1)
+            bout_pd['n_peaks'] = bout_pd['peaks_p'].apply(len)
+            bout_pd['l_p_ratio'] = bout_pd.apply(lambda r: np.nan if r['n_peaks']==0 else r['len_ms'] / (r['n_peaks']), axis=1)
+            
+            try:
+                delta = int(hparams['waveform_edges'] * hparams['sample_rate'] * 0.001)
+            except KeyError:
+                delta = 0
+
+            bout_pd['waveform'] = bout_pd.apply(lambda df: wav_i[df['start_sample'] - delta: df['end_sample'] + delta], axis=1)
+
+        else:
+            bout_pd = pd.DataFrame()
+        
+        chunk_start_sample += wav_i.size
+        bouts_pd_list.append(bout_pd)
+    
+    all_bout_pd = pd.concat(bouts_pd_list)
+    return all_bout_pd, wav_i
 
 def apply_files_offset(sess_pd, hparams):
     # append a column with the absolute timing of the start-end in the day of recording
@@ -226,9 +312,11 @@ def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
                 np.save(p_file_path, p)
 
             all_bout_pd.append(bout_pd)
-        except:
+        except Exception as exc:
             e = sys.exc_info()[0]
             logger.warning('Error while processing {}: {}'.format(raw_file_path, e))
+            logger.info(traceback.format_exc)
+            logger.info(exc)
 
     big_pd = pd.concat(all_bout_pd, axis=0, ignore_index=True, sort=True)
     
