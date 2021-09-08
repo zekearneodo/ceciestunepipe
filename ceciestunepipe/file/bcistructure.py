@@ -29,6 +29,11 @@ locations_dict['pakhi']= {'mnt': os.path.abspath('/mnt/sphere/speech_bci/'),
                              'fast': os.path.abspath('/scratch/earneodo')
                              }
 
+locations_dict['pouli']= {'mnt': os.path.abspath('/mnt/sphere/speech_bci/'),
+                             'local': os.path.abspath('/experiment/'),
+                             'fast': os.path.abspath('/experiment/tmp')
+                             }
+
 # locations_dict['pakhi']= {'mnt': os.path.abspath('/mnt/cube/earneodo/bci_zf/neuropix/birds'),
 #                              'local': os.path.abspath('/mnt/sphere/earneodo/bci_zf/ss_data'),
 #                              'fast': os.path.abspath('/scratch/earneodo/tmp')
