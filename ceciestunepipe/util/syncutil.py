@@ -25,3 +25,8 @@ def square_to_edges(x: np.array) -> np.array:
         sort_idxs = np.argsort(ttl_frames)
 
         return ttl_frames[sort_idxs], ttl_states[sort_idxs]
+
+def quick_ttl_threshold(x:np.array) -> np.float:
+    # assumes values oscilate roughly between two points (no outlier noise)
+    thresh = np.min(x) + np.ptp(x)/2
+    return thresh

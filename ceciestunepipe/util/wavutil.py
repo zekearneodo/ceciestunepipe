@@ -12,6 +12,8 @@ import warnings
 
 from scipy.io import wavfile
 
+from ceciestunepipe.util import syncutil as su
+
 logger = logging.getLogger('ceciestunepipe.util.wavutil')
 
 
@@ -40,3 +42,19 @@ def read_wav_chan(wav_path: str, chan_id: int=0) -> tuple:
         x = x.reshape(-1, 1)
     
     return s_f, x[:, chan_id]
+
+def wav_to_syn(file_path:str, chan=0):
+    # read the channel from the wave
+    # turn the square into a 'digital square' (e.g set a threshold)
+    s_f, x = read_wav_chan(file_path, chan_id=chan)
+    ttl_thresh = su.quick_ttl_threshold(x)
+    
+    # make a short 'digital' x
+    x_dig = np.zeros_like(x, dtype=np.int8)
+    x_dig[x > ttl_thresh] = 1
+    
+    # get the edges of it
+    ttl_events = su.square_to_edges(x_dig)
+    ttl_arr = np.vstack(list(ttl_events[:]))
+    
+    return s_f, x_dig, ttl_arr

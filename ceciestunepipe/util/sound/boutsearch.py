@@ -116,6 +116,7 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
     # Get the bouts. If loaded_p is none, it will copute it
     try:
         s_f, wav_i = hparams['read_wav_fun'](file_path)
+        hparams['sample_rate'] = s_f
         the_bouts, the_p, all_p, all_syl = get_the_bouts(wav_i, hparams, loaded_p=loaded_p)
     
     except Exception as e:
@@ -192,6 +193,7 @@ def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=9000000
     
     # Get the bouts. If loaded_p is none, it will copute it
     s_f, wav_i = hparams['read_wav_fun'](file_path)
+    hparams['sample_rate'] = s_f
 
     n_chunks = int(np.ceil(wav_i.shape[0]/chunk_size))
     wav_chunks = np.array_split(wav_i, n_chunks)
