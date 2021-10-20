@@ -4,6 +4,7 @@ import warnings
 import traceback
 import numpy as np
 import pandas as pd
+import pickle
 import logging
 import os
 import glob
@@ -201,11 +202,11 @@ def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=9000000
 
     chunk_start_sample = 0
     bouts_pd_list = []
-    for i_chunk, wav_i in tqdm(enumerate(wav_chunks), total=n_chunks):
+    for i_chunk, wav_chunk in tqdm(enumerate(wav_chunks), total=n_chunks):
         # get the bouts for a chunk
         # offset the starts to the beginning of the chunk
         # recompute the beginning of the next chunk
-        the_bouts, the_p, all_p, all_syl = get_the_bouts(wav_i, hparams, loaded_p=loaded_p)
+        the_bouts, the_p, all_p, all_syl = get_the_bouts(wav_chunk, hparams, loaded_p=loaded_p)
         chunk_offset_ms = int(1000 * chunk_start_sample / s_f)
         
         # make one bouts pd dataframe for the chunk
@@ -241,20 +242,32 @@ def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=9000000
             bout_pd['n_peaks'] = bout_pd['peaks_p'].apply(len)
             bout_pd['l_p_ratio'] = bout_pd.apply(lambda r: np.nan if r['n_peaks']==0 else r['len_ms'] / (r['n_peaks']), axis=1)
             
-            try:
-                delta = int(hparams['waveform_edges'] * hparams['sample_rate'] * 0.001)
-            except KeyError:
-                delta = 0
-
-            bout_pd['waveform'] = bout_pd.apply(lambda df: wav_i[df['start_sample'] - delta: df['end_sample'] + delta], axis=1)
+            # ### refer the starts, ends to the beginning of the chunk
+            # delta_l = -1*delta - chunk_start_sample
+            # delta_r = delta - cunk_start_sample
+            # bout_pd['waveform'] = bout_pd.apply(lambda df: wav_chunk[df['start_sample'] + delta_l: df['end_sample'] + delta_r], axis=1)
 
         else:
             bout_pd = pd.DataFrame()
         
-        chunk_start_sample += wav_i.size
+        chunk_start_sample += wav_chunk.size
         bouts_pd_list.append(bout_pd)
     
     all_bout_pd = pd.concat(bouts_pd_list)
+    all_bout_pd.reset_index(inplace=True, drop=True)
+    ###get all the waveforms
+    if not all_bout_pd.empty:
+        try:
+            delta = int(hparams['waveform_edges'] * hparams['sample_rate'] * 0.001)
+        except KeyError:
+            delta = 0
+        
+        all_bout_pd['waveform'] = all_bout_pd.apply(lambda df: wav_i[df['start_sample'] - delta: df['end_sample'] + delta], 
+        axis=1)
+
+        all_bout_pd['confusing'] = True
+        all_bout_pd['bout_check'] = False
+    
     return all_bout_pd, wav_i
 
 def apply_files_offset(sess_pd, hparams):
@@ -330,3 +343,23 @@ def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
     big_pd.to_pickle(out_file)
     logger.info('Saved all to {}'.format(out_file))
     return big_pd
+
+def get_epoch_bouts(i_path:str, hparams:dict):
+    epoch_bout_pd = get_bouts_in_long_file(i_path, hparams)[0]
+
+    i_folder = os.path.split(i_path)[0]
+    epoch_bouts_path = os.path.join(i_folder, hparams['bout_auto_file'])
+    hparams_pickle_path = os.path.join(i_folder, 'bout_search_params.pickle')
+
+    logger.info('saving bout detect parameters dict to ' + hparams_pickle_path)
+    with open(hparams_pickle_path, 'wb') as fh:
+        save_param = hparams.copy()
+        save_param['read_wav_fun'] = save_param['read_wav_fun'].__name__
+        save_param['file_order_fun'] = save_param['file_order_fun'].__name__
+        pickle.dump(save_param, fh)
+
+    logger.info('saving bouts pandas to ' + epoch_bouts_path)
+    epoch_bout_pd.to_pickle(epoch_bouts_path)
+
+    #epoch_bout_pd = pd.DataFrame()
+    return epoch_bout_pd

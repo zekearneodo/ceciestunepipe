@@ -80,7 +80,7 @@ def plot_as_raster(x, ax=None, t_0=None):
     if ax is None:
         fig, ax = plt.subplots()
     
-    raster = ax.scatter(t * x, frame * x, marker='.', facecolor='k', rasterized=True)
+    raster = ax.scatter(t * x, frame * x, marker='.', facecolor='k', s=1, rasterized=True)
     if t_0 is not None:
         ax.axvline(x=t_0, color='red')
     return ax

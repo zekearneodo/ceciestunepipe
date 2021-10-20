@@ -102,6 +102,12 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     exp_struct = {}
     bird, sess = sess_par['bird'], sess_par['sess']
 
+    try:
+        epoch = sess_par['epoch']
+    except KeyError:
+        logger.info('epoch None')
+        epoch = None
+
     exp_struct['folders'] = {}
     exp_struct['files'] = {}
 
@@ -136,7 +142,7 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
 
     # the 'derived' system (wav_mic, ...)
     exp_struct['folders']['derived'] = os.path.join(
-        location['mnt'], 'derived_data', bird, sess, ephys_folder)
+        location['mnt'], 'derived_data', bird, sess, ephys_folder, epoch)
     for f, n in zip(['wav_mic'], ['wav_mic.wav']):
         exp_struct['files'][f] = os.path.join(exp_struct['folders']['derived'], n)
 
@@ -252,7 +258,7 @@ def sgl_struct(sess_par: dict, epoch: str) -> dict:
     exp_struct['folders'] = {k: os.path.join(v, epoch)
                   for k, v in exp_struct['folders'].items()}
 
-    update_files = ['kwd', 'kwe', 'mda_raw', 'bin_raw', 'kwik', 'par']
+    update_files = ['kwd', 'kwe', 'mda_raw', 'bin_raw', 'kwik', 'par', 'wav_mic']
     updated_files_dict = {k: os.path.join(os.path.split(v)[0],
                                           epoch,
                                           os.path.split(v)[-1]) for k, v in exp_struct['files'].items() if k in update_files}

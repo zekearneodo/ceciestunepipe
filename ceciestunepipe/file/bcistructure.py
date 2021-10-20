@@ -4,6 +4,7 @@ import json
 import logging
 import glob
 import warnings
+import pandas as pd
 
 logger = logging.getLogger('ceciestunepipe.file.bcistructure')
 
@@ -156,6 +157,11 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     except KeyError:
         msort_location = location['local']
 
+    try:
+        sort_version = sess_par['sort']
+    except KeyError:
+        sort_version = None
+
     # MOUNTAINSORT FILE STRUCTURE
     exp_struct['folders']['msort'] = os.path.join(
         msort_location, bird, ephys_folder, 'msort', sess)
@@ -165,13 +171,14 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
 
     # KILOSORT FILE STRUCTURE
     exp_struct['folders']['ksort'] = os.path.join(
-        msort_location, bird, ephys_folder, 'ksort', sess)
+        msort_location, bird, ephys_folder, 'ksort', sess, sort_version)
     for f, n in zip(['bin_raw', 'par'], ['raw.bin', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['ksort'], n)
 
-   
-
+    # Sorted data file structure
+    exp_struct['folders']['sort'] = os.path.join(exp_struct['folders']['derived_data'], 
+    'sorted', sort_version)
     return exp_struct
 
 
@@ -252,7 +259,7 @@ def sgl_struct(sess_par: dict, epoch: str) -> dict:
     exp_struct['folders'] = {k: os.path.join(v, epoch)
                   for k, v in exp_struct['folders'].items()}
 
-    update_files = ['kwd', 'kwe', 'mda_raw', 'bin_raw', 'kwik', 'par']
+    update_files = ['kwd', 'kwe', 'mda_raw', 'bin_raw', 'kwik', 'par', 'wav_mic']
     updated_files_dict = {k: os.path.join(os.path.split(v)[0],
                                           epoch,
                                           os.path.split(v)[-1]) for k, v in exp_struct['files'].items() if k in update_files}
@@ -328,3 +335,36 @@ def split_path(path:str) -> list:
             path = parts[0]
             allparts.insert(0, parts[1])
     return allparts
+
+
+def epoch_meta_from_bout_series(s: pd.Series):
+    bird, sess, _, epoch = split_path(s['file'])[-5:-1]
+    s['bird'] =  bird
+    s['sess'] = sess
+    s['epoch'] = epoch
+    return s
+
+def get_epoch_bout_pd(sess_par, only_curated=False):
+    epoch = sess_par['epoch']
+    exp_struct = sgl_struct(sess_par, epoch)
+    sess_derived_path = os.path.split(os.path.split(exp_struct['folders']['derived'])[0])[0]
+    bout_pd_path = os.path.join(sess_derived_path, 'bouts_sglx', 'bout_curated.pickle')
+    logger.info('loading curated bouts for session {} from {}'.format(sess_par['sess'],
+                                                                               bout_pd_path))
+    
+    bout_pd = pd.read_pickle(bout_pd_path)
+    
+    # fill in with epoch metadata from the wav files path
+    logger.info('Filtering bouts for epoch {}'.format(epoch))
+    bout_pd = bout_pd.apply(epoch_meta_from_bout_series, axis=1)
+    
+    # drop all rows from other epoch
+    if only_curated:
+        logger.info('Filtering also only manually curated bouts')
+        bout_pd = bout_pd[(bout_pd['epoch'] == epoch) & (bout_pd['bout_check'] == True)]
+        bout_pd.reset_index(drop=True, inplace=True)
+    else:
+        bout_pd = bout_pd[(bout_pd['epoch'] == epoch)]
+        bout_pd.reset_index(drop=True, inplace=True)
+        
+    return bout_pd
