@@ -157,10 +157,7 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
     except KeyError:
         msort_location = location['local']
 
-    try:
-        sort_version = sess_par['sort']
-    except KeyError:
-        sort_version = None
+
 
     # MOUNTAINSORT FILE STRUCTURE
     exp_struct['folders']['msort'] = os.path.join(
@@ -170,19 +167,27 @@ def get_file_structure(location: dict, sess_par: dict) -> dict:
             exp_struct['folders']['msort'], n)
 
     # KILOSORT FILE STRUCTURE
+    # determine sort version, both for ksort and for the sort result in derived data
+    try:
+        sort_version = str(sess_par['sort'])
+        if sort_version is None:
+            sort_version = ''
+    except KeyError:
+        sort_version = ''
+        
     exp_struct['folders']['ksort'] = os.path.join(
         msort_location, bird, ephys_folder, 'ksort', sess, sort_version)
+
     for f, n in zip(['bin_raw', 'par'], ['raw.bin', 'params.json']):
         exp_struct['files'][f] = os.path.join(
             exp_struct['folders']['ksort'], n)
 
     # Sorted data file structure
-    exp_struct['folders']['sort'] = os.path.join(exp_struct['folders']['derived_data'], 
-    'sorted', sort_version)
+    exp_struct['folders']['sort'] = os.path.join(exp_struct['folders']['derived'], sort_version)
     return exp_struct
 
 
-def get_exp_struct(bird, sess, ephys_software='sglx', sort=None, location_dict: dict = dict()):
+def get_exp_struct(bird, sess, ephys_software='sglx', sort='', location_dict: dict = dict()):
     # get the configuration of the experiment:
     # if environment variable 'EXPERIMENT_PATH' exists,
     # read 'EXPERIMENT_PATH/config/expstruct.json'
@@ -255,9 +260,21 @@ def list_subfolders(folder_path):
 def sgl_struct(sess_par: dict, epoch: str) -> dict:
     # locations of the folders for the epoch, if ephys is sglx
     exp_struct = get_exp_struct(
-        sess_par['bird'], sess_par['sess'])
+        sess_par['bird'], sess_par['sess'], sort='')
+    
+    
+
+    ### for most, the epoch goes last
     exp_struct['folders'] = {k: os.path.join(v, epoch)
                   for k, v in exp_struct['folders'].items()}
+    
+    ### for the sort, the sort goes last
+    epoch_first_keys = ['sort', 'ksort']
+    sort_version = str(sess_par['sort'])
+    epoch_first_keys_folders_dict = {k: os.path.join(v, sort_version)
+                  for k, v in exp_struct['folders'].items() if (k in epoch_first_keys)}
+    exp_struct['folders'].update(epoch_first_keys_folders_dict)
+
 
     update_files = ['kwd', 'kwe', 'mda_raw', 'bin_raw', 'kwik', 'par', 'wav_mic']
     updated_files_dict = {k: os.path.join(os.path.split(v)[0],
