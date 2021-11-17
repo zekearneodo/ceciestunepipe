@@ -193,6 +193,7 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
     def save_ttl_events(self, file_path: str)->np.array:
          # save ttl_events as a npy file 
          # go from the tuple to the array 
+         pass
 
     def get_ttl_traces(self, start_frame=None, end_frame=None, channel_list=range(7)):
         logger.info('getting ttl traces, chan {}'.format(channel_list))
