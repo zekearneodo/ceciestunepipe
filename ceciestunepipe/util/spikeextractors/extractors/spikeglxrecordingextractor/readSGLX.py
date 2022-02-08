@@ -21,6 +21,7 @@ much easier!
 
 """
 import logging
+import warnings
 import numpy as np
 # import matplotlib.pyplot as plt
 from pathlib import Path
@@ -290,10 +291,24 @@ def extract_imec_syn_ch(raw_data: np.array, first_samp:int, last_samp:int, meta_
             logger.info("No imec sync channel saved.")
         else:
             i_dig_ch = n_ap + n_lf
-            #ttl_stream = raw_data[i_dig_ch, first_samp:last_samp]
-            ttl_thresh = np.mean(raw_data[i_dig_ch, first_samp:last_samp])
+            # in the SGLX, the byte is  used to store many signals:
+            # bit 6 is the waveform
+            # other bits are trigger and error signals
+            # in particular, bits 2-7 are errors
+            ttl_stream = raw_data[i_dig_ch, first_samp:last_samp].astype(np.uint8)
+            ttl_bit_arr = np.unpackbits(ttl_stream, bitorder='little').reshape(-1, 8)
+            # get the bit 6 for the heartbeat
+            ttl_heartbeat = ttl_bit_arr.T[6]
+            ttl_thresh = 0
             logger.info('Threshold for logical hi is {}'.format(ttl_thresh))
-            dig_array[raw_data[i_dig_ch, first_samp:last_samp] > ttl_thresh] = 1
+            dig_array[ttl_heartbeat[first_samp:last_samp] > ttl_thresh] = 1
+            
+            # check for errors bits 2, 3, 4, 5, 7
+            error_arr = ttl_bit_arr[:, [2, 3, 4, 5, 7]]
+            if np.any(error_arr):
+                n_errors = np.sum(error_arr)
+                warnings.warn('There were {} errors in the recording'.format(n_errors))
+                warnings.warn('You probably want to check those')
         return dig_array
 
 

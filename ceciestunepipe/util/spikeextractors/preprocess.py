@@ -1,12 +1,16 @@
 import numpy as np
 import pandas as pd
 import logging
+import os
+import pickle
 
 from scipy.io import wavfile
 from ceciestunepipe.file import bcistructure as et
 
 from ceciestunepipe.util import sglxutil as sglu
 from ceciestunepipe.util import rigutil as ru
+from ceciestunepipe.util import wavutil as wu
+
 from ceciestunepipe.util.spikeextractors.extractors.spikeglxrecordingextractor import spikeglxrecordingextractor as sglex
 
 logger = logging.getLogger('ceciestunepipe.util.spikeextractors.preprocess')
@@ -39,7 +43,6 @@ def extract_nidq_channels(sess_par, run_recs_dict, rig_dict, chan_name_list, cha
         stream = run_recs_dict['nidq'].get_ttl_traces()[chan_n_list, :]
     else:
         raise NotImplementedError('dont know how to deal with {} channels'.format(chan_type))
-    
     return stream
 
 def save_wav(stream: np.array, s_f: np.float, wav_path: str) -> int:
@@ -74,3 +77,102 @@ def chans_to_wav(recording_extractor, chan_list: list, wav_path:str) -> int:
     logger.info('saving {}-shaped array as npy in {}'.format(data_stream.shape, npy_path))
     np.save(npy_path, data_stream.T)
     return s_f
+
+def ttl_signal_to_npy(recording_extractor, rig_dict, signal_name, npy_path: str) -> np.array:
+    # get a channel order by its name
+    # extract the digital events
+    # save in a numpy array (n_events, 2) with (stamp, event) in each column
+    logger.info('looking for signal {} in the nidaq channels'.format(signal_name))
+    chan_id = int(ru.lookup_signal(rig_dict, signal_name)[1].split('-')[-1])
+    logger.info('found in chan {}'.format(chan_id))
+
+    ttl_tuple = recording_extractor.get_ttl_events(channel_id=chan_id)
+    ttl_arr = np.vstack(ttl_tuple).T
+    
+    logger.info('saving {}-shaped array as npy in {}'.format(ttl_arr.shape, npy_path))
+    np.save(npy_path, ttl_arr)
+    return ttl_tuple
+
+def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str) -> dict:
+    # get the recordings
+    logger.info('PREPROCESSING sess {} | epoch {}'.format(sess_par['sess'], epoch))
+    logger.info('getting extractors')
+    sgl_exp_struct = et.sgl_struct(sess_par, epoch)
+    run_recs_dict, run_meta_files, files_pd, rig_dict = load_sglx_recordings(sgl_exp_struct, epoch)
+    
+    # go through the sglx files of the session extracting data and events, according to the metadata found 
+    # in the rig.json file
+
+    ### For all the nidaq channels:
+    # get the sampling rate
+    nidq_s_f = run_recs_dict['nidq'].get_sampling_frequency()
+    
+    ## get the microphone(s) to wav
+    # get the chans
+    mic_list = sess_par['mic_list']
+    
+    logger.info('Getting microphone channel(s) {}'.format(mic_list))
+    mic_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, mic_list, chan_type='adc')
+    mic_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_mic.wav')
+    wav_s_f = wu.save_wav(mic_stream, nidq_s_f, mic_file_path)
+    
+    ### if there were other adc channels (stim, for instance)
+    ### get the stimulus signals to wav
+    if 'stim_list' in sess_par:
+        stim_list = sess_par['stim_list']
+    else:
+        stim_list = []
+    if len(stim_list) > 0:
+        logger.info('Getting stimulus channel(s) {}'.format(stim_list))
+
+        stim_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, stim_list, chan_type='adc')
+        stim_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_stim.wav')
+        wav_s_f = wu.save_wav(stim_stream, nidq_s_f, stim_file_path)
+        
+    # get the syn (from whatever TTL it was in) to wav
+    sync_list = ['sync']
+    logger.info('Getting sync channel(s) {}'.format(sync_list))
+    sync_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, sync_list, chan_type='ttl')  
+    sync_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_sync.wav')
+    wav_s_f = wu.save_wav(sync_stream, nidq_s_f, sync_file_path)
+    
+    logger.info('Getting sync events from the wav sync channel')
+    sync_ev_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_sync_evt.npy')
+    wav_s_f, x_d, ttl_arr = wu.wav_to_syn(sync_file_path)
+    logger.info('saving sync events of the wav channel to {}'.format(sync_ev_path))
+    np.save(sync_ev_path, ttl_arr)
+    
+    t_0_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_t0.npy')
+    logger.info('saving t0 for wav channel to {}'.format(t_0_path))
+    np.save(t_0_path, np.arange(sync_stream.size)/wav_s_f)
+    
+    # Get other digital channels
+    if 'nidq_ttl_list' in sess_par:
+        stim_list = sess_par['nidq_ttl_list']
+    else:
+        stim_list = []
+    if len(stim_list) > 0:
+        logger.info('Will get {} ttl signals'.format(len(stim_list)))
+    
+    for signal_name in stim_list:
+        sig_npy_path = os.path.join(sgl_exp_struct['folders']['derived'], '{}_evt.npy'.format(signal_name))
+        ttl_signal_to_npy(run_recs_dict['nidq'], rig_dict, signal_name, sig_npy_path)
+
+    #make the sync dict
+    syn_dict = {'s_f': wav_s_f,
+           't_0_path': t_0_path,
+           'evt_arr_path': sync_ev_path}
+    
+    syn_dict_path = os.path.join(sgl_exp_struct['folders']['derived'],  '{}_sync_dict.pkl'.format('wav'))
+    syn_dict['path'] = syn_dict_path
+    logger.info('saving sync dict to ' + syn_dict_path)
+    with open(syn_dict_path, 'wb') as pf:
+        pickle.dump(syn_dict, pf)
+
+    epoch_dict = {'epoch': epoch,
+                'files_pd': files_pd,
+                 'recordings': run_recs_dict,
+                 'meta': run_meta_files,
+                 'rig': rig_dict}
+    
+    return epoch_dict

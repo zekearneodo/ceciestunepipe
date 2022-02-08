@@ -93,31 +93,68 @@ def run_spikesort(recording_extractor: se.RecordingExtractor,
     
     return sort
 
-def load_spikes(ks_folder:str) -> tuple:
+def load_spikes(ks_folder:str, curated=False) -> tuple:
 
     spk_dict = {k: np.load(os.path.join(ks_folder, 
                                         'spike_{}.npy'.format(k))).flatten() for k in ['times', 'clusters']}
     
     spk_dict['cluster_id'] = spk_dict['clusters']
     spk_df = pd.DataFrame(spk_dict)
-    clu_df = pd.read_csv(os.path.join(ks_folder, 'cluster_KSLabel.tsv'), 
-                                sep='\t', header=0)
 
-    # get the templates
     templ_arr = np.load(os.path.join(ks_folder, 'templates.npy'))
-    clu_df['template'] = [x for x in templ_arr]
+
+    ### Make a 'symmetric' dataframe, both for manually curated and not.
+    # 'group' is the valid label. It is 'MSLabel' when manually curated, 'KSLabel' when not.
+    # 'KSLabel' is always there. It is equal to 'group' if no manual curation.
+    # 'MSLabel' is always there. It is equal to 'group' if manually curated, otherwise None.
+    # 'main_chan' comes from cluster_info when manually curated. Otherwise is ti computed from the template
+    # 'template' not always exists when manually curated. It only exists for clusters that were not created when curating with phy i.e merges)
+
+    if curated:
+        label_file = 'cluster_info.tsv'
+        clu_df = pd.read_csv(os.path.join(ks_folder, label_file), 
+                                sep='\t', header=0)
+            # rename or add manual sorted metadata
+        clu_df['main_chan'] = clu_df['ch']
+        clu_df['MSLabel'] = clu_df['group']
+
+        # Any new clusters created by merging clusters during manually curation will not have a template.
+        # They can be identified by the cluster_id number, which is higher than the last cluster_id of the automatic sorting (the ones in template_arr)
+        # For any cluster_id > templ_arr.shape[0], fill the template with zeros.
+        # Todo: get the missing templates from the temp_wh.dat matrix
+        # get the templates
+        clu_df['has_template'] = clu_df['cluster_id'].apply(lambda x: True if x < templ_arr.shape[0] else False)
+
+    else:
+        label_file = 'cluster_KSLabel.tsv'
+        clu_df = pd.read_csv(os.path.join(ks_folder, label_file), 
+                                sep='\t', header=0)
+        clu_df['group'] = clu_df['KSLabel']
+        clu_df['MSLabel'] = None
+        ## All clusters have template if no manual curation
+        clu_df['has_template'] = True
     
-    # with the templates, compute the sorted chanels, main channel, main 7 channels and waveform for the 7 channels
-    clu_df['max_chans'] = clu_df['template'].apply(lambda x: np.argsort(np.ptp(x, axis=0))[::-1])
-    clu_df['main_chan'] = clu_df['max_chans'].apply(lambda x: x[0])
-    
-    clu_df['main_7'] = clu_df['max_chans'].apply(lambda x: np.sort(x[:7]))
-    clu_df['main_wav_7'] = clu_df.apply(lambda x: x['template'][:, x['max_chans'][:7]], axis=1)
-    
-    clu_df.sort_values(['KSLabel', 'main_chan'], inplace=True)
+    # sort spike times
     spk_df.sort_values(['times'], inplace=True)
 
+    # get the templates wherever they exist
+    h_t = (clu_df['has_template'])
+
+    clu_df['template'] = clu_df['cluster_id'].apply(lambda x: templ_arr[x] if x < templ_arr.shape[0] else np.zeros_like(templ_arr[0]))
+    
+    # with the templates, compute the sorted chanels, main channel, main 7 channels and waveform for the 7 channels
+    h_t = (clu_df['has_template'])
+    clu_df.loc[h_t, 'max_chans'] = clu_df.loc[h_t, 'template'].apply(lambda x: np.argsort(np.ptp(x, axis=0))[::-1])
+    clu_df.loc[h_t, 'main_chan'] = clu_df.loc[h_t, 'max_chans'].apply(lambda x: x[0])
+    
+    clu_df.loc[h_t, 'main_7'] = clu_df.loc[h_t, 'max_chans'].apply(lambda x: np.sort(x[:7]))
+    clu_df.loc[h_t, 'main_wav_7'] = clu_df.loc[h_t, :].apply(lambda x: x['template'][:, x['max_chans'][:7]], axis=1)
+    
+    clu_df.sort_values(['group', 'main_chan'], inplace=True)
+    
+
     return clu_df, spk_df
+
 
 def load_cluster_info(ks_folder: str) -> pd.DataFrame:
     info_df = pd.read_csv(os.path.join(ks_folder, 'cluster_info.tsv'), 
