@@ -24,7 +24,7 @@ def save_wav(stream: np.array, s_f: np.float, wav_path: str):
     # write to wav
     logger.info('saving {}-shaped array as wav in {}'.format(stream.shape, wav_path))
     
-    os.makedirs(os.path.split(wav_path)[0], exist_ok=True)
+    os.makedirs(os.path.split(wav_path)[0], exist_ok=True, mode=0o777)
     wavfile.write(wav_path, wav_s_f, stream.T)
     
     ## also save as numpy

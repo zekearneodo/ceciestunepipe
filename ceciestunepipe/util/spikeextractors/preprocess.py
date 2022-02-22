@@ -5,11 +5,13 @@ import os
 import pickle
 
 from scipy.io import wavfile
+
 from ceciestunepipe.file import bcistructure as et
 
 from ceciestunepipe.util import sglxutil as sglu
 from ceciestunepipe.util import rigutil as ru
 from ceciestunepipe.util import wavutil as wu
+from ceciestunepipe.util import syncutil as su
 
 from ceciestunepipe.util.spikeextractors.extractors.spikeglxrecordingextractor import spikeglxrecordingextractor as sglex
 
@@ -30,6 +32,8 @@ def load_sglx_recordings(exp_struct: dict, epoch:str) -> tuple:
     run_meta_files = {k: v[i_run] for k, v in sgl_files.items()}
     run_recordings = {k: sglex.SpikeGLXRecordingExtractor(sglu.get_data_meta_path(v)[0]) for k, v in run_meta_files.items()}
     rig_dict = ru.get_rig_par(exp_struct)
+
+    logger.info('Got sglx recordings for keys {}'.format(list(run_recordings.keys())))
 
     return run_recordings, run_meta_files, files_pd, rig_dict 
 
@@ -52,7 +56,7 @@ def save_wav(stream: np.array, s_f: np.float, wav_path: str) -> int:
     
     # write to wav
     logger.info('saving {}-shaped array as wav in {}'.format(stream.shape, wav_path))
-    os.makedirs(os.path.split(wav_path)[0], exist_ok=True)
+    os.makedirs(os.path.split(wav_path)[0], exist_ok=True, mode=0o777)
     wavfile.write(wav_path, wav_s_f, stream.T)
     
     ## also save as numpy
@@ -66,7 +70,7 @@ def chans_to_wav(recording_extractor, chan_list: list, wav_path:str) -> int:
     data_stream = recording_extractor.get_traces(channel_ids=chan_list)
     # make sure folder exists
     logger.info('saving {}-shaped array as wav in {}'.format(data_stream.shape, wav_path))
-    os.makedirs(os.path.split(wav_path)[0], exist_ok=True)
+    os.makedirs(os.path.split(wav_path)[0], exist_ok=True, mode=0o777)
     # write it
     s_f = int(round(recording_extractor.get_sampling_frequency()/1000))*1000
     logger.info('sampling rate {}'.format(s_f))
@@ -93,12 +97,101 @@ def ttl_signal_to_npy(recording_extractor, rig_dict, signal_name, npy_path: str)
     np.save(npy_path, ttl_arr)
     return ttl_tuple
 
-def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str) -> dict:
+def load_syn_dict(exp_struct: dict, stream:str, arrays_to_load=['evt_arr', 't_0']) -> dict:
+    
+    syn_dict_path = os.path.join(exp_struct['folders']['derived'],  
+                                 '{}_sync_dict.pkl'.format(stream))
+    logger.info('loading syn_dict from ' + syn_dict_path)
+    with open(syn_dict_path, 'rb') as f:
+        syn_dict = pickle.load(f)
+     
+    for arr in arrays_to_load:
+        arr_path = syn_dict['{}_path'.format(arr)]
+        syn_dict[arr] = np.load(arr_path, mmap_mode='r')
+    return syn_dict
+
+def get_syn_pattern(run_recs_dict, exp_struct, stream:str, force=False):
+    logger.info('getting syn patterns for {}'.format(stream))
+    syn_dict_path = os.path.join(exp_struct['folders']['derived'], '{}_sync_dict.pkl'.format(stream))
+    
+    # if Force=true of file not found, compute it from the recording_dict
+    if not(os.path.exists(syn_dict_path) and (force is False)):
+        logger.info('File {} not found or forced computation, getting the events'.format(syn_dict_path))
+        if stream=='nidq':
+            raise NotImplementedError('Dont know how to force extraction of syn signals from nidq channels here. Go back to preprocessing')
+        
+        ## get syn from the imec channels
+        syn_tuple, syn_arr = get_syn_imec(run_recs_dict[stream])
+        
+        t_0_path = os.path.join(exp_struct['folders']['derived'],  '{}_t0.npy'.format(stream))
+        syn_npy_path = os.path.join(exp_struct['folders']['derived'],  '{}_sync_evt.npy'.format(stream))
+                                 
+        logger.info('saving events array to ' + syn_npy_path)
+        np.save(syn_npy_path, syn_arr)
+        
+        logger.info('saving t_0 array to ' + t_0_path)                                 
+        np.save(t_0_path, syn_tuple[1])
+        
+        syn_dict = {'path': syn_dict_path,
+                    's_f': syn_tuple[0],
+                   't_0_path': t_0_path,
+                    'evt_arr_path': syn_npy_path
+                   }
+        
+        # save without the array, and open the array as a memmap
+        logger.info('saving sync dict to ' + syn_dict_path)
+        with open(syn_dict_path, 'wb') as pf:
+            pickle.dump(syn_dict, pf)
+
+    ## in any case, load the saved dict so everything comes from the memmaped arrays
+    syn_dict = load_syn_dict(exp_struct, stream) 
+    return syn_dict
+
+def get_syn_imec(run_sglx_recording) -> tuple:
+    ## get syn from the imec channels
+    syn_tuple = run_sglx_recording.get_effective_sf()
+    syn_arr = np.vstack(list(syn_tuple[2][:]))
+    return syn_tuple, syn_arr
+
+def sync_all(all_syn_dict: dict, ref_stream: str, force=False) -> dict:
+    logger.info('syncing all times to {}'.format(ref_stream))
+    ref_syn_dict = all_syn_dict[ref_stream]
+    for one_stream, one_syn_dict in all_syn_dict.items():
+        if one_stream==ref_stream:
+            continue
+            
+        logger.info(' synch {}...'.format(one_stream))
+        
+        t_0_folder = os.path.split(one_syn_dict['t_0_path'])[0]
+        t_p_path = os.path.join(t_0_folder, '{}-tp.npy'.format(one_stream))
+        
+        if not(os.path.exists(t_p_path) and (force is False)):
+            logger.info('  t_prime file {} not found or forced computation, getting the events'.format(t_p_path))
+        
+            t_prime = su.sync_to_pattern(one_syn_dict['evt_arr'], one_syn_dict['t_0'],
+                                                     ref_syn_dict['evt_arr'], ref_syn_dict['t_0'])
+            logger.info('    saving t_prime array to ' + t_p_path)                                 
+            np.save(t_p_path, t_prime)
+        
+            #clar the memory, then load as memmap
+            del t_prime
+        
+            one_syn_dict['t_p_path'] = t_p_path
+            # save the dict with the path to the sync it
+            logger.info('    saving synced dict to {}'.format(one_syn_dict['path']))
+            with open(one_syn_dict['path'], 'wb') as fp:
+                pickle.dump(one_syn_dict, fp)
+            
+        one_syn_dict['t_p'] = np.load(t_p_path, mmap_mode='r')
+    return
+
+def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_stream=None) -> dict:
     # get the recordings
     logger.info('PREPROCESSING sess {} | epoch {}'.format(sess_par['sess'], epoch))
     logger.info('getting extractors')
     sgl_exp_struct = et.sgl_struct(sess_par, epoch)
     run_recs_dict, run_meta_files, files_pd, rig_dict = load_sglx_recordings(sgl_exp_struct, epoch)
+    
     
     # go through the sglx files of the session extracting data and events, according to the metadata found 
     # in the rig.json file
@@ -131,7 +224,7 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str) -> dict:
         
     # get the syn (from whatever TTL it was in) to wav
     sync_list = ['sync']
-    logger.info('Getting sync channel(s) {}'.format(sync_list))
+    logger.info('Getting sync channel(s) from nidaq streams: {}'.format(sync_list))
     sync_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, sync_list, chan_type='ttl')  
     sync_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_sync.wav')
     wav_s_f = wu.save_wav(sync_stream, nidq_s_f, sync_file_path)
@@ -159,20 +252,39 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str) -> dict:
         ttl_signal_to_npy(run_recs_dict['nidq'], rig_dict, signal_name, sig_npy_path)
 
     #make the sync dict
-    syn_dict = {'s_f': wav_s_f,
+    nidq_syn_dict = {'s_f': wav_s_f,
            't_0_path': t_0_path,
            'evt_arr_path': sync_ev_path}
     
-    syn_dict_path = os.path.join(sgl_exp_struct['folders']['derived'],  '{}_sync_dict.pkl'.format('wav'))
-    syn_dict['path'] = syn_dict_path
-    logger.info('saving sync dict to ' + syn_dict_path)
-    with open(syn_dict_path, 'wb') as pf:
-        pickle.dump(syn_dict, pf)
+    nidq_syn_dict_path = os.path.join(sgl_exp_struct['folders']['derived'],  '{}_sync_dict.pkl'.format('wav'))
+    nidq_syn_dict['path'] = nidq_syn_dict_path
+    logger.info('saving sync nidaq dict to ' + nidq_syn_dict_path)
+    with open(nidq_syn_dict_path, 'wb') as pf:
+        pickle.dump(nidq_syn_dict, pf)
 
+    ### get the sync for all other imec streams
+    all_streams_list = list(run_recs_dict.keys())
+    imec_streams = [x for x in all_streams_list if any(y in x for y in ['lf', 'ap'])]
+    logger.info('Getting sync signals for imec streams: {}'.format(imec_streams))
+    all_syn_dict = {k: get_syn_pattern(run_recs_dict, sgl_exp_struct, k, force=True) for k in imec_streams}
+    
+    # load all the nidq, wav syn_pattern made above, in the kosher way
+    all_syn_dict['nidq'] = get_syn_pattern(run_recs_dict, sgl_exp_struct, 'nidq', force=False)
+    all_syn_dict['wav'] = get_syn_pattern(run_recs_dict, sgl_exp_struct, 'wav', force=False)
+
+    ### sync all to one pattern
+    if do_sync_to_stream is not None:
+        logger.info('Will do the sync to stream {}'.format(do_sync_to_stream))
+        sync_all(all_syn_dict, do_sync_to_stream, force=True)
+
+    # make the overall epoch pre-process dictt
     epoch_dict = {'epoch': epoch,
+                'sgl_exp_struct': sgl_exp_struct,
                 'files_pd': files_pd,
                  'recordings': run_recs_dict,
                  'meta': run_meta_files,
-                 'rig': rig_dict}
+                 'rig': rig_dict,
+                 'syn': all_syn_dict
+                 }
     
     return epoch_dict

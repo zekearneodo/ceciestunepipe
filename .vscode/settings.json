@@ -1,3 +1,4 @@
 {
-    "python.pythonPath": "/mnt/cube/earneodo/envs/pakhi/unepipe/bin/python"
+    "python.pythonPath": "/mnt/cube/earneodo/envs/pakhi/unepipe/bin/python",
+    "python.linting.enabled": false
 }
