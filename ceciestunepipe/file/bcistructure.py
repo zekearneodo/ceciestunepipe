@@ -1,3 +1,4 @@
+from builtins import NotImplementedError
 import os
 import socket
 import json
@@ -61,6 +62,19 @@ def get_locations_from_hostname():
 def read_json_exp_struct():
     raise NotImplementedError
 
+def get_location_dict() -> dict:
+    # get the locations dict from an environment variable or from the hostname, using the get_locations_from_hostname
+    read_exp_base = os.environ.get('EXPERIMENT_PATH')
+
+    if read_exp_base is not None:
+        # if there is a .json file configured with the variables of the experiment
+        exp_base = os.path.abspath(read_exp_base)
+        location_dict_json_path = os.path.join(exp_base, 'exp_struct.json')
+        location_dict = read_json_exp_struct()
+    else:
+        # try to read it from the hostname
+        location_dict = get_locations_from_hostname()
+    return location_dict
 
 def get_file_structure(location: dict, sess_par: dict) -> dict:
     """[summary]
@@ -195,16 +209,7 @@ def get_exp_struct(bird, sess, ephys_software='sglx', sort='', location_dict: di
     if location_dict:
         pass
     else:
-        read_exp_base = os.environ.get('EXPERIMENT_PATH')
-
-        if read_exp_base is not None:
-            # if there is a .json file configured with the variables of the experiment
-            exp_base = os.path.abspath(read_exp_base)
-            location_dict_json_path = os.path.join(exp_base, 'exp_struct.json')
-            location_dict = read_json_exp_struct()
-        else:
-            # try to read it from the hostname
-            location_dict = get_locations_from_hostname()
+        location_dict = get_location_dict()
 
     # make the exp struct dict.
     sess_par_dict = {'bird': bird,
@@ -215,6 +220,8 @@ def get_exp_struct(bird, sess, ephys_software='sglx', sort='', location_dict: di
 
     return exp_struct
 
+def get_birds_list(ephys_software, location_dict: dict=dict()):
+    raise NotImplementedError
 
 def get_rig_par(exp_struct: dict) -> dict:
     rig_par_file = exp_struct['files']['rig']
@@ -234,6 +241,18 @@ def get_probe_port(exp_struct: dict, selected_probe: str) -> str:
 
 def list_sessions(bird: str, location_dict: dict = dict(), section='raw', ephys_software='sgl') -> list:
     exp_struct = get_exp_struct(bird, '', location_dict=location_dict)
+    try:
+        sess_list = next(os.walk(exp_struct['folders'][section]))[1]
+        sess_list.sort()
+        return sess_list
+    except StopIteration:
+        #raise Warning
+        msg = 'No sessions for bird in {}'.format(exp_struct['folders'][section])
+        warnings.warn(msg)
+        #return None
+
+def list_birds(location_dict: dict = dict(), section='raw', ephys_software='sgl') -> list:
+    exp_struct = get_exp_struct('', '', location_dict=location_dict)
     try:
         sess_list = next(os.walk(exp_struct['folders'][section]))[1]
         sess_list.sort()

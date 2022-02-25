@@ -9,7 +9,9 @@ import logging
 import os
 import glob
 import sys
+import traceback
 
+from scipy.io import wavfile
 from tqdm.auto import tqdm
 
 from ceciestunepipe.util.sound import spectral as sp
@@ -17,6 +19,58 @@ from ceciestunepipe.util.sound import temporal as st
 
 
 logger = logging.getLogger('ceciestunepipe.util.sound.boutsearch')
+
+def read_wav_chan(wav_path: str, chan_id: int=0) -> tuple:
+    s_f, x = wavfile.read(wav_path, mmap=True)
+    return s_f, x[:, chan_id]
+
+def sess_file_id(f_path):
+    n = int(os.path.split(f_path)[1].split('-')[-1].split('.wav')[0])
+    return n
+
+def sample_rate_from_wav(wav_path):
+    sample_rate, x = wavfile.read(wav_path)
+    return sample_rate
+
+default_hparams = { # default parameters work well for starling
+    # spectrogram
+    'num_freq':1024, #1024# how many channels to use in a spectrogram #
+    'preemphasis':0.97, 
+    'frame_shift_ms':5, # step size for fft
+    'frame_length_ms':10, #128 # frame length for fft FRAME SAMPLES < NUM_FREQ!!!
+    'min_level_db':-55, # minimum threshold db for computing spe 
+    'ref_level_db':110, # reference db for computing spec
+    'sample_rate':None, # sample rate of your data
+    
+    # spectrograms
+    'mel_filter': False, # should a mel filter be used?
+    'num_mels':1024, # how many channels to use in the mel-spectrogram
+    'fmin': 500, # low frequency cutoff for mel filter
+    'fmax': 12000, # high frequency cutoff for mel filter
+    
+    # spectrogram inversion
+    'max_iters':200,
+    'griffin_lim_iters':20,
+    'power':1.5,
+
+    # Added for the searching
+    'read_wav_fun': read_wav_chan, # function for loading the wav_like_stream (has to returns fs, ndarray)
+    'file_order_fun': sess_file_id, # function for extracting the file id within the session
+    'min_segment': 30, # Minimum length of supra_threshold to consider a 'syllable' (ms)
+    'min_silence': 2000, # Minmum distance between groups of syllables to consider separate bouts (ms)
+    'min_bout': 5000, # min bout duration (ms)
+    'peak_thresh_rms': 0.55, # threshold (rms) for peak acceptance,
+    'thresh_rms': 0.25, # threshold for detection of syllables
+    'mean_syl_rms_thresh': 0.3, #threshold for acceptance of mean rms across the syllable (relative to rms of the file)
+    'max_bout': 120000, #exclude bouts too long
+    'l_p_r_thresh': 100, # threshold for n of len_ms/peaks (typycally about 2-3 syllable spans
+    
+    'waveform_edges': 1000, #get number of ms before and after the edges of the bout for the waveform sample
+    
+    'bout_auto_file': 'bout_auto.pickle', # extension for saving the auto found files
+    'bout_curated_file': 'bout_checked.pickle', #extension for manually curated files (coming soon)
+    }
+
 
 def gimmepower(x, hparams):
     s = sp.rosa_spectrogram(x.flatten(), hparams)
@@ -110,7 +164,7 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
 
     # Decide and see if it CAN load the power
     logger.info('Getting bouts for file {}'.format(file_path))
-    print('tu vieja file {}'.format(file_path))
+    print('file {}...'.format(file_path))
     sys.stdout.flush()
     #logger.debug('s_f {}'.format(s_f))
     
@@ -125,6 +179,7 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
         logger.info('error {}'.format(e))
         print('error in {}'.format(file_path))
         sys.stdout.flush()
+        traceback.print_exception()
         # return empty DataFrame
         the_bouts = np.empty(0)
         wav_i = np.empty(0)
@@ -188,7 +243,7 @@ def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=9000000
 
     # Decide and see if it CAN load the power
     logger.info('Getting bouts for long file {}'.format(file_path))
-    print('tu vieja file {}'.format(file_path))
+    #print('tu vieja file {}'.format(file_path))
     sys.stdout.flush()
     #logger.debug('s_f {}'.format(s_f))
     
@@ -287,12 +342,24 @@ def apply_files_offset(sess_pd, hparams):
     sess_pd['end_abs_sample'] = sess_pd['end_sample'] + sess_pd['i_file'] * file_len
     return sess_pd
 
+def cleanup(bout_pd: pd.DataFrame) -> pd.DataFrame:
+    ## check for empty waveforms (how woudld THAT happen???)
+    bout_pd['valid_waveform'] = bout_pd['waveform'].apply(lambda x: (False if x.size==0 else True))
+    
+    # valid is & of all the validated criteria
+    bout_pd['valid'] = bout_pd['valid_waveform']
+    
+    # drop not valid and reset index
+    bout_pd.drop(bout_pd[bout_pd['valid']==False].index, inplace=True)
+    bout_pd.reset_index(drop=True, inplace=True)
+    return bout_pd
+
 def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
     logger.info('Going for the bouts in all the files of the session {}'.format(os.path.split(raw_folder)[-1]))
     logger.debug('Saving all process files to {}'.format(proc_folder))
     
     try:
-        os.makedirs(proc_folder)
+        os.makedirs(proc_folder, exist_ok=True, mode=0o777)
     except FileExistsError:
         pass
     
@@ -335,16 +402,21 @@ def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
 
     big_pd = pd.concat(all_bout_pd, axis=0, ignore_index=True, sort=True)
     
-    ## apply some refinements
+    ## apply some refinements, filter those that have good waveforms and get spectrograms
     if (hparams['file_order_fun'] is not None) and big_pd.index.size > 0:
         big_pd = apply_files_offset(big_pd, hparams)
+        big_pd = cleanup(big_pd)
+        logger.info('getting spectrograms')
+        big_pd['spectrogram'] = big_pd['waveform'].apply(lambda x: gimmepower(x, hparams)[2])
 
     out_file = os.path.join(proc_folder, hparams['bout_auto_file'])
     big_pd.to_pickle(out_file)
+    os.chmod(out_file, 0o777)
     logger.info('Saved all to {}'.format(out_file))
+    
     return big_pd
 
-def get_epoch_bouts(i_path:str, hparams:dict):
+def get_epoch_bouts(i_path: str, hparams: dict) -> pd.DataFrame:
     epoch_bout_pd = get_bouts_in_long_file(i_path, hparams)[0]
 
     i_folder = os.path.split(i_path)[0]
@@ -357,9 +429,11 @@ def get_epoch_bouts(i_path:str, hparams:dict):
         save_param['read_wav_fun'] = save_param['read_wav_fun'].__name__
         save_param['file_order_fun'] = save_param['file_order_fun'].__name__
         pickle.dump(save_param, fh)
+    os.chmod(hparams_pickle_path, 0o777)
 
     logger.info('saving bouts pandas to ' + epoch_bouts_path)
     epoch_bout_pd.to_pickle(epoch_bouts_path)
+    os.chmod(epoch_bouts_path, 0o777)
 
     #epoch_bout_pd = pd.DataFrame()
     return epoch_bout_pd
