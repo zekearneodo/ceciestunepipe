@@ -117,8 +117,8 @@ def get_syn_pattern(run_recs_dict, exp_struct, stream:str, force=False):
     # if Force=true of file not found, compute it from the recording_dict
     if not(os.path.exists(syn_dict_path) and (force is False)):
         logger.info('File {} not found or forced computation, getting the events'.format(syn_dict_path))
-        if stream=='nidq':
-            raise NotImplementedError('Dont know how to force extraction of syn signals from nidq channels here. Go back to preprocessing')
+        if stream=='wav':
+            raise NotImplementedError('Dont know how to force extraction of syn signals from wav channels here. Go back to preprocessing')
         
         ## get syn from the imec channels
         syn_tuple, syn_arr = get_syn_imec(run_recs_dict[stream])

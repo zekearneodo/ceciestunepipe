@@ -21,6 +21,8 @@ from tqdm.auto import tqdm
 from ceciestunepipe.util.sound import spectral as sp
 from ceciestunepipe.util.sound import temporal as st
 
+from ceciestunepipe.util import fileutil as fu
+
 from ceciestunepipe.file import bcistructure as et
 from ceciestunepipe.util.sound import boutsearch as bs
 
@@ -96,15 +98,15 @@ def save_auto_bouts(sess_bout_pd, sess_par, hparams):
     hparams_pickle_path = os.path.join(
         sess_bouts_dir, 'bout_search_params.pickle')
 
-    os.makedirs(sess_bouts_dir, exist_ok=True, mode=0o777)
+    fu.makedirs(sess_bouts_dir, exist_ok=True, mode=0o777)
     logger.info('saving bouts pandas to ' + sess_bouts_path)
     sess_bout_pd.to_pickle(sess_bouts_path)
-    os.chmod(sess_bouts_path, 0o777)
+    fu.chmod(sess_bouts_path, 0o777)
 
     logger.info('saving bout detect parameters dict to ' + hparams_pickle_path)
     with open(hparams_pickle_path, 'wb') as fh:
         pickle.dump(hparams, fh)
-    os.chmod(hparams_pickle_path, 0o777)
+    fu.chmod(hparams_pickle_path, 0o777)
 
 
 def bout_to_wav(a_bout: pd.Series, sess_par, hparams, dest_dir):
@@ -122,7 +124,7 @@ def bout_to_wav(a_bout: pd.Series, sess_par, hparams, dest_dir):
 def bouts_to_wavs(sess_bout_pd, sess_par, hparams, dest_dir):
     # make the dest_dir if does not exist
     logger.info('Saving all session bouts to folder ' + dest_dir)
-    os.makedirs(dest_dir, exist_ok=True, mode=0o777)
+    fu.makedirs(dest_dir, exist_ok=True, mode=0o777)
     # write all the motifs to wavs
     sess_bout_pd.apply(lambda x: bout_to_wav(
         x, sess_par, hparams, dest_dir), axis=1)
@@ -201,27 +203,36 @@ def search_bird_bouts(bird: str, sess_list: list, hparams:dict, ephys_software: 
     
     return 0
 
-def all_bird_bouts_search(bird: str, days_lookup: int, hparams:dict, ephys_software: str='alsa', n_jobs=4, force=False) -> int:
+def all_bird_bouts_search(bird: str, days_lookup: int, hparams:dict, ephys_software: str='alsa', n_jobs=4, force=False, do_today=False) -> int:
     # get all bouts in a bird for the last days_lookup days
-    from_date = datetime.date.today() - datetime.timedelta(days=5)
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    from_date = datetime.date.today() - datetime.timedelta(days=days_lookup)
     from_date_str = from_date.strftime('%Y-%m-%d')
+    
     logger.info('Getting all bouts for bird {} from date {} onward'.format(bird, from_date_str))
+    if do_today:
+        logger.info('Including today')
 
     sess_list = et.list_sessions(bird, section='raw', ephys_software=ephys_software)
     sess_arr = np.array(sess_list)
-    do_sess_list = list(sess_arr[sess_arr > from_date_str])
+    
+    sess_arr = sess_arr[(sess_arr >= from_date_str)]
 
+    if do_today is False:
+        sess_arr = sess_arr[:-1]
+
+    do_sess_list = list(sess_arr)
     search_result = search_bird_bouts(bird, do_sess_list, hparams, ephys_software=ephys_software, n_jobs=n_jobs, force=force)
     return search_result
 
-def get_birds_bouts(birds_list: list, days_lookup: int, hparams:dict, ephys_software: str='alsa', n_jobs=4, force=False) -> int:
+def get_birds_bouts(birds_list: list, days_lookup: int, hparams:dict, ephys_software: str='alsa', n_jobs=4, force=False, do_today=False) -> int:
     logger.info('Getting all bouts for birds {} for the last {} days'.format(birds_list, days_lookup))
 
     for bird in birds_list:
-        search_result = all_bird_bouts_search(bird, days_lookup, hparams, ephys_software=ephys_software, n_jobs=n_jobs, force=False)
+        search_result = all_bird_bouts_search(bird, days_lookup, hparams, ephys_software=ephys_software, n_jobs=n_jobs, force=force, do_today=do_today)
     return search_result
 
-def get_starlings_alsa_bouts(days_lookup: int, n_jobs=4) -> int:
+def get_starlings_alsa_bouts(days_lookup: int, n_jobs: int=4, force: boolean=False, do_today=False) -> int:
     # get all birds
     all_birds_list = et.list_birds(section='raw', ephys_software='alsa')
 
@@ -230,7 +241,7 @@ def get_starlings_alsa_bouts(days_lookup: int, n_jobs=4) -> int:
 
     # get all_sessions for the bird list
     starling_hparams = bs.default_hparams
-    get_birds_bouts(starling_list, days_lookup, starling_hparams, ephys_software='alsa', n_jobs=n_jobs)
+    get_birds_bouts(starling_list, days_lookup, starling_hparams, ephys_software='alsa', n_jobs=n_jobs, force=force, do_today=do_today)
 
 def get_one_day_bouts(bird, sess):
     starling_hparams = bs.default_hparams
@@ -289,10 +300,14 @@ def main():
     logger.info('Running searchbout on {}'.format(socket.gethostname()))
 
     # get all birds
-    days_lookup = 5
-    get_starlings_alsa_bouts(days_lookup)
+    days_lookup = 2
+    do_today=False
+    force_compute = False
 
-    #get_one_day_bouts('s_b1300_22', '2022-02-24')
+    get_starlings_alsa_bouts(days_lookup, force=force_compute, do_today=do_today)
+
+    #get_birds_bouts(['s_b1370_22'], days_lookup, bs.default_hparams, ephys_software='alsa', n_jobs=12, force=True, do_today=do_today)
+    #get_one_day_bouts('s_b1267_22', '2022-03-24')
     # apply filters if any
 
     logger.info('done for the day')

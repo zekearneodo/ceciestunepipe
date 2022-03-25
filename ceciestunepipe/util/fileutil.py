@@ -7,6 +7,21 @@ import shutil
 
 logger = logging.getLogger('ceciestunepipe.util.fileutil')
 
+
+def makedirs(dir_path, exist_ok=True, mode=0o777):
+    try:
+        original_mask = os.umask(000)
+        os.makedirs(dir_path, exist_ok=exist_ok, mode=mode)
+    finally:
+        os.umask(original_mask)
+
+def chmod(file_path, mode=0o777):
+    try:
+        original_mask = os.umask(000)
+        os.chmod(file_path, mode)
+    finally:
+        os.umask(original_mask)
+
 # copy path to dest, skip f existed
 def safe_copy(src_path: str, dest_path: str):
     if not os.path.exists(dest_path):

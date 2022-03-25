@@ -14,6 +14,7 @@ import traceback
 from scipy.io import wavfile
 from tqdm.auto import tqdm
 
+from ceciestunepipe.util import fileutil as fu
 from ceciestunepipe.util.sound import spectral as sp
 from ceciestunepipe.util.sound import temporal as st
 
@@ -358,10 +359,7 @@ def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
     logger.info('Going for the bouts in all the files of the session {}'.format(os.path.split(raw_folder)[-1]))
     logger.debug('Saving all process files to {}'.format(proc_folder))
     
-    try:
-        os.makedirs(proc_folder, exist_ok=True, mode=0o777)
-    except FileExistsError:
-        pass
+
     
     sess_files = glob.glob(os.path.join(raw_folder, '*.wav'))
     sess_files.sort()
@@ -411,7 +409,7 @@ def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
 
     out_file = os.path.join(proc_folder, hparams['bout_auto_file'])
     big_pd.to_pickle(out_file)
-    os.chmod(out_file, 0o777)
+    fu.chmod(out_file, 0o777)
     logger.info('Saved all to {}'.format(out_file))
     
     return big_pd
@@ -429,11 +427,11 @@ def get_epoch_bouts(i_path: str, hparams: dict) -> pd.DataFrame:
         save_param['read_wav_fun'] = save_param['read_wav_fun'].__name__
         save_param['file_order_fun'] = save_param['file_order_fun'].__name__
         pickle.dump(save_param, fh)
-    os.chmod(hparams_pickle_path, 0o777)
+    fu.chmod(hparams_pickle_path, 0o777)
 
     logger.info('saving bouts pandas to ' + epoch_bouts_path)
     epoch_bout_pd.to_pickle(epoch_bouts_path)
-    os.chmod(epoch_bouts_path, 0o777)
+    fu.chmod(epoch_bouts_path, 0o777)
 
     #epoch_bout_pd = pd.DataFrame()
     return epoch_bout_pd
