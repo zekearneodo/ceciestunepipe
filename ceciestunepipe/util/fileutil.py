@@ -3,6 +3,7 @@ import sys
 import glob
 import logging
 import shutil
+import pickle
 
 
 logger = logging.getLogger('ceciestunepipe.util.fileutil')
@@ -34,3 +35,8 @@ def append_binary(src_path: str, dest_path: str, chunk_size: int=4194304):
     logger.info('Appending binaries {} -> {}'.format(src_path, dest_path))
     with open(dest_path, "ab") as dest_file, open(src_path, "rb") as src_file:
         shutil.copyfileobj(src_file, dest_file, chunk_size)
+
+def save_pickle(obj, pickle_path):
+    with open(pickle_path, 'wb') as fh:
+        pickle.dump(obj, fh)
+    chmod(pickle_path, mode=0o777)

@@ -258,7 +258,7 @@ def ExtractDigital(rawData, firstSamp, lastSamp, dwReq, dLineList, meta):
     else:
         MN, MA, XA, DW = ChannelCountsNI(meta)
         if dwReq > DW-1:
-            print("Maximum digital word in file = %d" % (DW-1))
+            logger.info("Maximum digital word in file = %d" % (DW-1))
             dig_array = np.zeros((0), 'uint8')
             
         else:

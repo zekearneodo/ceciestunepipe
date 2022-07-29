@@ -66,7 +66,7 @@ def coarse(x: np.ndarray, n_coarse: int):
     coarse_x = np.nanmean(exploded_x, axis=-1)
     return coarse_x
 
-def plot_as_raster(x, ax=None, t_0=None):
+def plot_as_raster(x, ax=None, t_0=None, t_f=None):
     #x is [n_events, n_timestamps] array
     n_y, n_t = x.shape
     
@@ -83,6 +83,9 @@ def plot_as_raster(x, ax=None, t_0=None):
     raster = ax.scatter(t * x, frame * x, marker='.', facecolor='k', s=1, rasterized=True)
     if t_0 is not None:
         ax.axvline(x=t_0, color='red')
+
+    if t_f is not None:
+        ax.axvline(x=t_f, color='red')
     return ax
     
 def plot_trial_raster(trial_raster: np.array, ev_marks: dict={}, ax=None, bin_size=0):

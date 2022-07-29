@@ -12,7 +12,8 @@ from ceciestunepipe.util import sglxutil as sglu
 from ceciestunepipe.util import rigutil as ru
 from ceciestunepipe.util import wavutil as wu
 from ceciestunepipe.util import syncutil as su
-
+from ceciestunepipe.util import stimutil as st
+from ceciestunepipe.util import fileutil as fu
 from ceciestunepipe.util.spikeextractors.extractors.spikeglxrecordingextractor import spikeglxrecordingextractor as sglex
 
 logger = logging.getLogger('ceciestunepipe.util.spikeextractors.preprocess')
@@ -147,11 +148,13 @@ def get_syn_pattern(run_recs_dict, exp_struct, stream:str, force=False):
     syn_dict = load_syn_dict(exp_struct, stream) 
     return syn_dict
 
-def get_syn_imec(run_sglx_recording) -> tuple:
+def get_syn_imec(run_sglx_recording: sglex.SpikeGLXRecordingExtractor) -> tuple:
     ## get syn from the imec channels
-    syn_tuple = run_sglx_recording.get_effective_sf()
+    syn_tuple = run_sglx_recording.get_effective_sf(force_ttl=True)
     syn_arr = np.vstack(list(syn_tuple[2][:]))
     return syn_tuple, syn_arr
+
+
 
 def sync_all(all_syn_dict: dict, ref_stream: str, force=False) -> dict:
     logger.info('syncing all times to {}'.format(ref_stream))
@@ -203,25 +206,49 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_strea
     ## get the microphone(s) to wav
     # get the chans
     mic_list = sess_par['mic_list']
-    
     logger.info('Getting microphone channel(s) {}'.format(mic_list))
     mic_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, mic_list, chan_type='adc')
     mic_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_mic.wav')
     wav_s_f = wu.save_wav(mic_stream, nidq_s_f, mic_file_path)
-    
+
     ### if there were other adc channels (stim, for instance)
     ### get the stimulus signals to wav
+    if 'adc_list' in sess_par:
+        adc_list = sess_par['adc_list']
+        logger.info('Getting adc channel(s) {}'.format(adc_list))
+        adc_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, adc_list, chan_type='adc')
+        adc_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_adc.wav')
+        wav_s_f = wu.save_wav(adc_stream, nidq_s_f, adc_file_path)
+        adc_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_adc.npy')
+        np.save(adc_file_path, adc_stream)
+
     if 'stim_list' in sess_par:
         stim_list = sess_par['stim_list']
     else:
         stim_list = []
+    
     if len(stim_list) > 0:
         logger.info('Getting stimulus channel(s) {}'.format(stim_list))
 
         stim_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, stim_list, chan_type='adc')
         stim_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_stim.wav')
         wav_s_f = wu.save_wav(stim_stream, nidq_s_f, stim_file_path)
-        
+
+        if 'wav_syn' in stim_list:
+            wav_syn_ch_in_stream = np.where(np.array(sess_par['stim_list']) == 'wav_syn')[0][0]
+            
+            logger.info('Getting the onset/offset of stimuli from the {} extracted analog channel'.format(wav_syn_ch_in_stream))
+            wav_sync_stream = stim_stream[wav_syn_ch_in_stream]
+            sine_ev, sine_ttl, t_ttl = st.get_events_from_sine_sync(wav_sync_stream, nidq_s_f, step_ms=100)
+
+            sine_ttl_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_stim_sync_sine_ttl.npy')
+            sine_ttl_t_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_stim_sync_sine_ttl_t.npy')
+            sine_ev_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_stim_sync_sine_ttl_evt.npy')
+            np.save(sine_ttl_path, sine_ttl)
+            np.save(sine_ttl_t_path, t_ttl)
+            np.save(sine_ev_path, sine_ev)
+            logger.info('saved onset/offset of trial events from the sine wave in ' + sine_ev_path)
+
     # get the syn (from whatever TTL it was in) to wav
     sync_list = ['sync']
     logger.info('Getting sync channel(s) from nidaq streams: {}'.format(sync_list))
@@ -284,7 +311,14 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_strea
                  'recordings': run_recs_dict,
                  'meta': run_meta_files,
                  'rig': rig_dict,
-                 'syn': all_syn_dict
+                 'syn': all_syn_dict,
+                 'sess_par': sess_par
                  }
     
+    epoch_dict_path = os.path.join(sgl_exp_struct['folders']['derived'], 'preprocess_par.pickle')
+    save_keys_list = ['epoch', 'sgl_exp_struct', 'files_pd', 'meta', 'rig', 'sess_par']
+    epoch_dict_save = {k: epoch_dict[k] for k in save_keys_list}
+    
+    fu.save_pickle(epoch_dict_save, epoch_dict_path)
+    logger.info('saved epoch preprocessing parameters to ' + epoch_dict_path)
     return epoch_dict

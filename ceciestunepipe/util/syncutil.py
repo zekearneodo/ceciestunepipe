@@ -70,7 +70,4 @@ def sync_to_pattern(x_ttl: np.array, t: np.array, x_0_ttl: np.array, t_0:np.arra
     t_prime = t_interp_f(np.arange(n_samples))
     return t_prime
 
-def tuputamadre(x):
-        return 3
-
 

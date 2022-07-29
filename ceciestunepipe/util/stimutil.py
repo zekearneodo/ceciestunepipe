@@ -150,15 +150,22 @@ def stim_dict_to_pd(tag_dict: dict) -> pd.DataFrame:
                  'stim_name': list(tag_dict.keys())})
     return tag_pd
 
-def get_trials_pd(trial_ttl: np.array, trial_stream:np.array, stim_s_f, on_signal: int=1, tag_chan: int=1):
+
+def get_trials_pd(trial_ttl: np.array, trial_stream:np.array, stim_s_f, on_signal: int=1, tag_chan: int=1, 
+stim_tags_dict: dict=None, trial_is_onof=False) -> pd.DataFrame:
     
     # get the on/of
-    onof = get_trials_from_ttl(trial_ttl, on_signal=on_signal)
+    ##trial_ttl can be the on_off already (2, n) array with onset/offses
+    ### or it can be
+    onof = trial_ttl if trial_is_onof else get_trials_from_ttl(trial_ttl, on_signal=on_signal)
     # get the precise on/ofs and the sine frequencies
     all_starts, all_ends =  get_trials_info(onof, trial_stream[:, tag_chan], stim_s_f)
     
     # check consistency
     match_freq = (all_starts[:, 2]//10 == all_ends[:, 2]//10)
+    logger.debug('match_freqs is {}'.format(np.vstack([all_starts[:, 0], all_ends[:, 1] + 1, 
+    all_starts[:, 2], all_ends[:, 2]]).T))
+    
     if not all(match_freq):
         raise RuntimeError("Frequency mismatch between found in onset and offset")
     # make into a pd
@@ -166,6 +173,9 @@ def get_trials_pd(trial_ttl: np.array, trial_stream:np.array, stim_s_f, on_signa
     columns=['start', 'end', 'tag_freq_int'])
 
     # if given use a dictionary to relate frequency to wav file 
+    if stim_tags_dict is not None:
+        logger.info('Entered a stim/frequency tag dictionary, will match and get the stim names onto the trials pandas dataframe')
+        trials_pd = get_trial_stim_names(trials_pd, stim_tags_dict)
 
     return trials_pd
 
@@ -204,3 +214,55 @@ tag_dict: dict=None):
     return trial_pd
 
 
+def sine_to_ttl(x, s_f, step_ms=100, n_fft=256, debug=False) -> np.array:
+    ### turn the sine wave of stimulus tag into an events onset/offset signal
+    # get the spectrogram and the sum
+    # find the midpoint of the sum
+    # get everything above as on, below as off
+    # find onsets, shift by -1
+    # find offsets, shift by 1
+
+    f, t, s = sp.ms_spectrogram(x, s_f, step_ms=step_ms, n_window=n_fft)
+    p = s.sum(axis=0)
+    p_0 = np.max(s[0]) # the power in the continuous
+    
+    threshold = int(p_0*1.5)
+    
+    p[p<=threshold] = 0
+    p[p>threshold] = 1
+
+    # now the signal is a pseudo TTL, at a scale of 100 ms.
+    if debug:
+        return f, t, s
+    else:
+        return p, t
+
+def ttl_to_ev(x) -> np.array:
+    ## receives an array with 0, 1.
+    ## retunrs a (2, n) array with (tn, +/-1) for hi/lo events. tn is sample of x, t is unused for now
+
+    on = np.where(np.diff(x)==1)[0]
+    off = np.where(np.diff(x)==-1)[0]
+
+    onof = np.hstack( (np.vstack( (on, np.ones_like(on)* 1)), 
+    np.vstack((off, np.ones_like(off) * (-1) )) )
+    )
+
+    return onof[:, np.argsort(onof[0])].T
+
+def get_events_from_sine_sync(x:np.array, s_f: np.float, step_ms:np.int=100) -> np.array:
+    
+    ms_sf = np.round(s_f/1000)*1000
+    sample_factor = ms_sf * 0.001 * step_ms
+
+    sine_ttl, t_ttl = sine_to_ttl(x, ms_sf, step_ms=step_ms)
+    sine_onof = ttl_to_ev(sine_ttl)
+    
+    if sine_onof.size > 0:
+        sine_ev = get_trials_from_ttl(sine_onof, on_signal=1)
+        sine_ev = (sine_ev*sample_factor).astype(int)
+    else:
+        sine_ev = np.empty(0)
+    
+    logger.info('found {} events'.format(sine_ev.size/2))
+    return sine_ev, sine_ttl, t_ttl

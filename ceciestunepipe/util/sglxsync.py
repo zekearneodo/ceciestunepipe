@@ -3,6 +3,8 @@ import pickle
 import logging
 import numpy as np
 import pandas as pd
+#from yaml import warnings
+import warnings
 
 from ceciestunepipe.file import bcistructure as et
 from ceciestunepipe.util.spike import kilosort as ks
@@ -31,7 +33,7 @@ def get_syn_pattern(run_recs_dict, exp_struct, stream:str, force=False):
     # if Force=true of file not found, compute it from the recording_dict
     if not(os.path.exists(syn_dict_path) and (force is False)):
         logger.info('File {} not found or forced computation, getting the events'.format(syn_dict_path))
-        syn_tuple = run_recs_dict[stream].get_effective_sf()
+        syn_tuple = run_recs_dict[stream].get_effective_sf(force_ttl=True)
         syn_arr = np.vstack(list(syn_tuple[2][:]))
         
         t_0_path = os.path.join(exp_struct['folders']['derived'],  '{}_t0.npy'.format(stream))
@@ -83,6 +85,11 @@ def sync_all(all_syn_dict: dict, ref_stream: str, force=False) -> dict:
         if not(os.path.exists(t_p_path) and (force is False)):
             logger.info('  t_prime file {} not found or forced computation, getting the events'.format(t_p_path))
         
+            # check if it had skipped beats
+            skipped_beat = check_skipped(one_syn_dict)
+            if skipped_beat:
+                raise RuntimeError('Events array for {} had skipped heartbeats'.format(one_stream))
+
             t_prime = su.sync_to_pattern(one_syn_dict['evt_arr'], one_syn_dict['t_0'],
                                                      ref_syn_dict['evt_arr'], ref_syn_dict['t_0'])
             logger.info('    saving t_prime array to ' + t_p_path)                                 
@@ -98,7 +105,55 @@ def sync_all(all_syn_dict: dict, ref_stream: str, force=False) -> dict:
                 pickle.dump(one_syn_dict, fp)
             
         one_syn_dict['t_p'] = np.load(t_p_path, mmap_mode='r')
+    logger.info('Done with sync_all')
     return
+
+def ignore_last_edge(all_syn_dict: dict, ref_stream:str):
+    ## ignore the last edge in an array of ttls to be synced to a ref. stream
+    ## It could happen that all other systems were shut down after the ref stream.
+    ## This can be dangerous: first need to check 
+    #   - that no beat was skipped,
+    #   - that the sign of the first ttl match
+    #   - that the sign of the remaining last ttl will match
+
+    warnings.warn('About to discard heartbeat ttls beyond the last ttl in {}'.format(ref_stream))
+    last_edge = all_syn_dict[ref_stream]['evt_arr'].size//2
+    last_sign = all_syn_dict[ref_stream]['evt_arr'][1, -1]
+
+    logger.info('Reference stream {} has {} edges, last is {}'.format(ref_stream, last_edge, last_sign))
+    for stream, one_syn_dict in all_syn_dict.items():
+        s_edge = one_syn_dict['evt_arr'].size//2
+        s_sign = one_syn_dict['evt_arr'][1, -1]
+        s_t = one_syn_dict['t_0'][one_syn_dict['evt_arr'][0, -1]]
+
+        logger.info('stream {} had {} edges, last one {} at t={}'.format(stream, s_edge, s_sign, s_t))
+        one_syn_dict['evt_arr'] = one_syn_dict['evt_arr'][:, :last_edge]
+    
+    return all_syn_dict
+
+def check_skipped(one_syn_dict: dict, round_ms=50) -> int:
+    # check if a beat was skipped
+    skipped_beat = False
+
+    evt_arr = one_syn_dict['evt_arr']
+    evt_t = one_syn_dict['t_0'][evt_arr[0]]
+
+    logger.info('Event array has {} events'.format(evt_arr.size//2))
+
+    # get the unique periods, rounded at 50 ms
+    evt_period_ms = np.unique(np.round((np.unique(np.diff(evt_t))*1000)/round_ms)*round_ms).astype(int)
+    if evt_period_ms.size > 1:
+        skipped_beat = True
+        warnings.warn('More than 1 different periods detected: {}'.format(evt_period_ms))
+
+    # check that the diff between every other edge is zero
+    period_diff = np.hstack([np.diff(evt_arr[1][1:][::2]), np.diff(evt_arr[1][::2])])
+    if not (all(period_diff==0)):
+        skipped_beat=True
+        warnings.warn('Difference between corresponding periodic edges is not zero: {}'.format(np.unique(period_diff)))
+    
+    return skipped_beat
+
 
 
 def bout_dict_from_array(bout_arr: np.array, all_syn_dict: dict) -> dict:
@@ -126,19 +181,19 @@ def bout_dict_from_array(bout_arr: np.array, all_syn_dict: dict) -> dict:
     bout_dict['start_sample_ap_0'] = (bout_dict['start_sample_ap_0']).astype(np.int64)
     return bout_dict
 
-def bout_dict_from_pd(bout_pd: pd.DataFrame, all_syn_dict: dict) -> dict:
-    s_f_wav = all_syn_dict['wav']['s_f']
+def bout_dict_from_pd(bout_pd: pd.DataFrame, all_syn_dict: dict, s_f_key: str='wav') -> dict:
+    s_f = all_syn_dict[s_f_key]['s_f']
     
     start_ms = bout_pd['start_ms'].values
     len_ms = bout_pd['len_ms'].values
     
     bout_dict = {
-            's_f': s_f_wav, # s_f used to get the spectrogram
+            's_f': s_f, # s_f used to get the spectrogram
             's_f_nidq': all_syn_dict['nidq']['s_f'],
             's_f_ap_0': all_syn_dict['ap_0']['s_f'],
            'start_ms': start_ms,
             'len_ms': len_ms,
-           'start_sample_naive': ( start_ms * s_f_wav * 0.001).astype(np.int64),
+           'start_sample_naive': ( start_ms * s_f * 0.001).astype(np.int64),
            'start_sample_nidq': np.array([np.where(all_syn_dict['nidq']['t_0'] > start)[0][0] for start in start_ms*0.001]),
             'start_sample_wav': np.array([np.where(all_syn_dict['wav']['t_0'] > start)[0][0] for start in start_ms*0.001])
            }
@@ -148,8 +203,55 @@ def bout_dict_from_pd(bout_pd: pd.DataFrame, all_syn_dict: dict) -> dict:
     bout_dict['start_ms_ap_0'] = start_ms_ap_0
     bout_dict['start_sample_ap_0'] = np.array([np.where(all_syn_dict['ap_0']['t_0'] > start)[0][0] for start in start_ms_ap_0*0.001])
     bout_dict['start_sample_ap_0'] = (bout_dict['start_sample_ap_0']).astype(np.int64)
-    return bout_dict
+    bout_dict['end_sample_ap_0'] = bout_dict['start_sample_ap_0'] + (bout_dict['len_ms'] * bout_dict['s_f_ap_0'] * 0.001).astype(np.int64)
+    
+    ## update the bout pandas dataframe with the synced columns
+    for k in ['start_ms_ap_0', 'start_sample_ap_0', 'len_ms', 'start_ms', 'start_sample_naive']:
+        bout_pd[k] = bout_dict[k]
 
+    return bout_dict, bout_pd
+
+
+def trial_syn_from_pd(bout_pd: pd.DataFrame, all_syn_dict: dict, s_f_key: str='nidq') -> dict:
+    
+    s_f_nidq = all_syn_dict['nidq']['s_f']
+    
+    start_sample = bout_pd['start'].values
+    len_sample = (bout_pd['end'] - bout_pd['start']).values
+    start_s = all_syn_dict['nidq']['t_0'][start_sample]
+    
+    bout_pd['start_ms'] = start_s * 1000
+    bout_pd['len_ms'] = len_sample / s_f_nidq * 1000
+    
+    # overwrite the start sample with the one that I got from the synpd
+    bout_dict, bout_pd = bout_dict_from_pd(bout_pd, all_syn_dict, s_f_key=s_f_key)
+    bout_pd['start_sample_' + s_f_key] = start_sample
+    bout_dict['start_sample_' + s_f_key] = start_sample
+    
+    bout_dict.update({
+            'tag_freq': bout_pd['tag_freq'].values,
+            'stim_name': bout_pd['stim_name'].values
+           })
+
+    return bout_dict, bout_pd
+
+
+def sync_trial_pd(trial_pd: pd.DataFrame, all_syn_dict: dict, keep_keys: list=None, s_f_key: str='nidq'):
+    ### sync all the trials into a dictionary
+    ### use the dictionary to complete a synced_trial_pd
+    
+    trial_dict, trial_syn_pd = trial_syn_from_pd(trial_pd, all_syn_dict, s_f_key=s_f_key)
+    
+    if keep_keys is None:
+        keep_keys = ['start_ms', 'len_ms', 'tag_freq','start_sample_nidq', 'start_sample_naive', 
+        'start_sample_ap_0', 'start_ms_ap_0']
+    
+    dict_to_pd = {k: v for (k, v) in trial_dict.items() if k in keep_keys}
+    
+    synced_trial_pd = pd.DataFrame.from_dict(dict_to_pd)
+    synced_trial_pd = trial_pd.merge(synced_trial_pd, left_on='start', right_on='start_sample_' + s_f_key)
+    
+    return trial_dict, synced_trial_pd
 
 def collect_bout(bout_dict, bout_idx, run_recordings, t_pre, t_post, spk_df, clu_list, mic_stream, all_syn_dict):
     ## add the length of the bout (in seconds) to the end of the segment

@@ -176,8 +176,8 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
         dw = 0
         dig = ExtractDigital(self._raw, firstSamp=start_frame, lastSamp=end_frame, dwReq=dw, dLineList=channel,
                              meta=self._meta)
-        self._dig = np.squeeze(dig).astype(int)
-        diff_dig = np.diff(self._dig)
+        dig = np.squeeze(dig).astype(int)
+        diff_dig = np.diff(dig)
 
         rising = np.where(diff_dig > 0)[0] + start_frame
         falling = np.where(diff_dig < 0)[0] + start_frame
@@ -195,14 +195,16 @@ class SpikeGLXRecordingExtractor(RecordingExtractor):
          # go from the tuple to the array 
          pass
 
-    def get_ttl_traces(self, start_frame=None, end_frame=None, channel_list=range(7)):
+    def get_ttl_traces(self, start_frame=None, end_frame=None, channel_list=np.arange(8), ignore_existing=True):
         logger.info('getting ttl traces, chan {}'.format(channel_list))
-        if self._dig is None:
+        if (self._dig is None) or (ignore_existing ==True):
             # get all of the digital traces
             dw = 0
-            n_samples = self.get_traces().shape[-1]
-
-            dig = ExtractDigital(self._raw, firstSamp=0, lastSamp=n_samples, dwReq=dw, dLineList=channel_list,
+            if end_frame is None:
+                end_frame = self._raw.shape[-1]
+            if start_frame is None:
+                start_frame = 0
+            dig = ExtractDigital(self._raw, firstSamp=start_frame, lastSamp=end_frame, dwReq=dw, dLineList=channel_list,
                              meta=self._meta)
             self._dig = np.squeeze(dig).astype(np.short)
         

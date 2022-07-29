@@ -23,6 +23,9 @@ logger = logging.getLogger('ceciestunepipe.util.sound.boutsearch')
 
 def read_wav_chan(wav_path: str, chan_id: int=0) -> tuple:
     s_f, x = wavfile.read(wav_path, mmap=True)
+    if x.ndim==1:
+        x = x.reshape(-1, 1)
+    
     return s_f, x[:, chan_id]
 
 def sess_file_id(f_path):
@@ -32,6 +35,34 @@ def sess_file_id(f_path):
 def sample_rate_from_wav(wav_path):
     sample_rate, x = wavfile.read(wav_path)
     return sample_rate
+
+class BoutParamsUnpickler(pickle.Unpickler):
+    # hparams during the search in boutsearch contains functions that are saved in the pickle.
+    # Loading the pickle naively will search for those functions in the __main__ module and will fail.
+    # This custom pickle loader will interject and replace the functions with the ones in the boutsearch module.
+    # https://stackoverflow.com/questions/27732354/unable-to-load-files-using-pickle-and-multiple-modules
+    def find_class(self, module, name):
+        if name == 'read_wav_chan':
+            return read_wav_chan
+        elif name == 'sess_file_id':
+            return sess_file_id
+        else:
+            return super().find_class(module, name)
+
+class BoutParamsPickler(pickle.Pickler):
+    # hparams during the search in boutsearch contains functions that are saved in the pickle.
+    # Loading the pickle naively will search for those functions in the __main__ module and will fail.
+    # This custom pickle loader will interject and replace the functions with the ones in the boutsearch module.
+    # https://stackoverflow.com/questions/27732354/unable-to-load-files-using-pickle-and-multiple-modules
+    def find_class(self, module, name):
+        if name == 'read_wav_chan':
+            logger.info('bout pickler')
+            from ceciestunepipe.util.sound import boutsearch as bs
+            return bs.read_wav_chan
+        elif name == 'sess_file_id':
+            return sess_file_id
+        else:
+            return super().find_class(module, name)
 
 default_hparams = { # default parameters work well for starling
     # spectrogram
@@ -58,12 +89,12 @@ default_hparams = { # default parameters work well for starling
     'read_wav_fun': read_wav_chan, # function for loading the wav_like_stream (has to returns fs, ndarray)
     'file_order_fun': sess_file_id, # function for extracting the file id within the session
     'min_segment': 30, # Minimum length of supra_threshold to consider a 'syllable' (ms)
-    'min_silence': 2000, # Minmum distance between groups of syllables to consider separate bouts (ms)
-    'min_bout': 5000, # min bout duration (ms)
+    'min_silence': 3000, # Minmum distance between groups of syllables to consider separate bouts (ms)
+    'min_bout': 3000, # min bout duration (ms)
     'peak_thresh_rms': 0.55, # threshold (rms) for peak acceptance,
     'thresh_rms': 0.25, # threshold for detection of syllables
     'mean_syl_rms_thresh': 0.3, #threshold for acceptance of mean rms across the syllable (relative to rms of the file)
-    'max_bout': 120000, #exclude bouts too long
+    'max_bout': 180000, #exclude bouts too long
     'l_p_r_thresh': 100, # threshold for n of len_ms/peaks (typycally about 2-3 syllable spans
     
     'waveform_edges': 1000, #get number of ms before and after the edges of the bout for the waveform sample
@@ -71,7 +102,6 @@ default_hparams = { # default parameters work well for starling
     'bout_auto_file': 'bout_auto.pickle', # extension for saving the auto found files
     'bout_curated_file': 'bout_checked.pickle', #extension for manually curated files (coming soon)
     }
-
 
 def gimmepower(x, hparams):
     s = sp.rosa_spectrogram(x.flatten(), hparams)
@@ -230,7 +260,6 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
         bout_pd = pd.DataFrame()
     return bout_pd, wav_i, all_p
   
-
 def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=90000000):
     # path of the wav_file
     # h_params from the rosa spectrogram plus the parameters:
@@ -343,18 +372,6 @@ def apply_files_offset(sess_pd, hparams):
     sess_pd['end_abs_sample'] = sess_pd['end_sample'] + sess_pd['i_file'] * file_len
     return sess_pd
 
-def cleanup(bout_pd: pd.DataFrame) -> pd.DataFrame:
-    ## check for empty waveforms (how woudld THAT happen???)
-    bout_pd['valid_waveform'] = bout_pd['waveform'].apply(lambda x: (False if x.size==0 else True))
-    
-    # valid is & of all the validated criteria
-    bout_pd['valid'] = bout_pd['valid_waveform']
-    
-    # drop not valid and reset index
-    bout_pd.drop(bout_pd[bout_pd['valid']==False].index, inplace=True)
-    bout_pd.reset_index(drop=True, inplace=True)
-    return bout_pd
-
 def get_bouts_session(raw_folder, proc_folder, hparams, force_p_compute=False):
     logger.info('Going for the bouts in all the files of the session {}'.format(os.path.split(raw_folder)[-1]))
     logger.debug('Saving all process files to {}'.format(proc_folder))
@@ -421,17 +438,53 @@ def get_epoch_bouts(i_path: str, hparams: dict) -> pd.DataFrame:
     epoch_bouts_path = os.path.join(i_folder, hparams['bout_auto_file'])
     hparams_pickle_path = os.path.join(i_folder, 'bout_search_params.pickle')
 
-    logger.info('saving bout detect parameters dict to ' + hparams_pickle_path)
-    with open(hparams_pickle_path, 'wb') as fh:
-        save_param = hparams.copy()
-        save_param['read_wav_fun'] = save_param['read_wav_fun'].__name__
-        save_param['file_order_fun'] = save_param['file_order_fun'].__name__
-        pickle.dump(save_param, fh)
-    fu.chmod(hparams_pickle_path, 0o777)
-
+    save_bouts_params_dict(hparams, hparams_pickle_path)
     logger.info('saving bouts pandas to ' + epoch_bouts_path)
     epoch_bout_pd.to_pickle(epoch_bouts_path)
     fu.chmod(epoch_bouts_path, 0o777)
 
     #epoch_bout_pd = pd.DataFrame()
     return epoch_bout_pd
+
+def save_bouts_params_dict(hparams:dict, hparams_pickle_path: str):
+    logger.info('saving bout detect parameters dict to ' + hparams_pickle_path)
+    saveparams = hparams.copy()
+    
+    with open(hparams_pickle_path, 'wb') as fh:
+        if(saveparams['read_wav_fun'].__name__=='read_wav_chan'):
+             saveparams['read_wav_fun'] = read_wav_chan
+        if(saveparams['file_order_fun'].__name__=='sess_file_id'):
+             saveparams['file_order_fun'] = sess_file_id
+        pickler = BoutParamsPickler(fh)
+        pickler.dump(saveparams)
+    fu.chmod(hparams_pickle_path, 0o777)
+
+def load_bouts_params_dict(hparams_pickle_path: str):
+    logger.info('loading detect parameters dict from ' + hparams_pickle_path)
+    with open(hparams_pickle_path, 'rb') as fh:
+        unpickler = BoutParamsUnpickler(fh)
+        hparams = unpickler.load()
+
+def cleanup(bout_pd: pd.DataFrame) -> pd.DataFrame:
+    ## check for empty waveforms (how woudld THAT happen???)
+    bout_pd['valid_waveform'] = bout_pd['waveform'].apply(lambda x: (False if x.size==0 else True))
+    
+    # valid is & of all the validated criteria
+    bout_pd['valid'] = bout_pd['valid_waveform']
+    
+    # drop not valid and reset index
+    bout_pd.drop(bout_pd[bout_pd['valid']==False].index, inplace=True)
+    bout_pd.reset_index(drop=True, inplace=True)
+    return bout_pd
+
+
+def sess_bout_summary(bout_pd: pd.DataFrame, ax_dict: dict=None, bouts_type='curated') -> pd.DataFrame:
+    ## make and plot a summary of the bird's bout.
+    # get lengths of the bouts
+    # get estimate timestamps of bouts
+    # plot histogram length of bouts
+    # histogram of time of bouts
+
+    # len/time? (when do they sing the longest?)
+
+    return bout_pd
