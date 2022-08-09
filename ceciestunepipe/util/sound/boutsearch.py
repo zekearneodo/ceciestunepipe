@@ -21,12 +21,18 @@ from ceciestunepipe.util.sound import temporal as st
 
 logger = logging.getLogger('ceciestunepipe.util.sound.boutsearch')
 
-def read_wav_chan(wav_path: str, chan_id: int=0) -> tuple:
+def read_wav_chan(wav_path: str, chan_id: int=0, return_int16=True) -> tuple:
+    # return_int16 makes a safe casting to int16 to not confuse librosa et al in the following steps
     s_f, x = wavfile.read(wav_path, mmap=True)
     if x.ndim==1:
         x = x.reshape(-1, 1)
     
-    return s_f, x[:, chan_id]
+    if return_int16:
+        y = (x[:, chan_id]>>16).astype(np.int16)
+    else:
+        y = x[:, chan_id]
+    
+    return s_f, y
 
 def sess_file_id(f_path):
     n = int(os.path.split(f_path)[1].split('-')[-1].split('.wav')[0])
@@ -182,7 +188,7 @@ def get_the_bouts(x, spec_par_rosa, loaded_p=None):
     
     return long_enough_bouts, power_values, p, syllables
 
-def get_bouts_in_file(file_path, hparams, loaded_p=None):
+def get_bouts_in_file(file_path, hparams, loaded_p=None, return_error_code=False):
     # path of the wav_file
     # h_params from the rosa spectrogram plus the parameters:
     #     'read_wav_fun': load_couple, # function for loading the wav_like_stream (has to returns fs, ndarray)
@@ -195,7 +201,7 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
 
     # Decide and see if it CAN load the power
     logger.info('Getting bouts for file {}'.format(file_path))
-    print('file {}...'.format(file_path))
+    #print('file {}...'.format(file_path))
     sys.stdout.flush()
     #logger.debug('s_f {}'.format(s_f))
     
@@ -204,17 +210,20 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
         s_f, wav_i = hparams['read_wav_fun'](file_path)
         hparams['sample_rate'] = s_f
         the_bouts, the_p, all_p, all_syl = get_the_bouts(wav_i, hparams, loaded_p=loaded_p)
+        error_code = 0 #success
     
     except Exception as e:
-        warnings.warn('Error getting bouts for file {}'.format(file_path))
-        logger.info('error {}'.format(e))
-        print('error in {}'.format(file_path))
+        warn_msg = 'Error getting bouts for file ' + file_path
+        warnings.warn(warn_msg)
+        logger.info('error message was {}'.format(e))
+        #print('Un {}'.format(file_path))
         sys.stdout.flush()
-        traceback.print_exception()
+        traceback.print_exc()
         # return empty DataFrame
         the_bouts = np.empty(0)
         wav_i = np.empty(0)
         all_p = np.empty(0)
+        error_code = 1 #there was an error
         
 
     if the_bouts.size > 0:
@@ -258,7 +267,13 @@ def get_bouts_in_file(file_path, hparams, loaded_p=None):
 
     else:
         bout_pd = pd.DataFrame()
-    return bout_pd, wav_i, all_p
+
+    if return_error_code:
+        logger.info('returning empty dataframe for file {}'.format(file_path))
+        return bout_pd, wav_i, all_p, error_code
+    else:
+        return bout_pd, wav_i, all_p
+
   
 def get_bouts_in_long_file(file_path, hparams, loaded_p=None, chunk_size=90000000):
     # path of the wav_file

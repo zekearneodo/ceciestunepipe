@@ -89,7 +89,14 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
 
     #sess_pd_list = [bs.get_bouts_in_file(i, hparams)[0] for i in wav_path_list]
     # update the sample rate
-    hparams['sample_rate'] = bs.sample_rate_from_wav(wav_path_list[0])
+    ## quick and dirty, find the first one that is possible
+    for i_path in wav_path_list:
+        try:
+            hparams['sample_rate'] = bs.sample_rate_from_wav(i_path)
+            break
+        except:
+            logger.info('could not get rate from file {}'.format(i_path))
+
     # concatenate the file, filter by 'good' waveform, get spectrogram and reindex
     sess_bout_pd = pd.concat(sess_pd_list)
     # before doing check that it's not empty
@@ -367,14 +374,14 @@ def main():
 
     # get all birds
     days_lookup = 2
-    do_today = True
+    do_today = False
     force_compute = False
 
     get_starlings_alsa_bouts(
-        days_lookup, force=force_compute, do_today=do_today)
+          days_lookup, force=force_compute, do_today=do_today)
 
-    #get_birds_bouts(['s_b1370_22'], days_lookup, bs.default_hparams, ephys_software='alsa', n_jobs=12, force=True, do_today=do_today)
-    #get_one_day_bouts('s_b1267_22', '2022-03-24')
+    #get_birds_bouts(['s_b1376_22', 's_b1444_22', 's_b1572_22'], days_lookup, bs.default_hparams, ephys_software='alsa', n_jobs=12, force=True, do_today=do_today)
+    #get_one_day_bouts('s_b1555_22', '2022-08-06')
     # apply filters if any
 
     logger.info('done for the day')
