@@ -28,7 +28,12 @@ def read_wav_chan(wav_path: str, chan_id: int=0, return_int16=True) -> tuple:
         x = x.reshape(-1, 1)
     
     if return_int16:
-        y = (x[:, chan_id]>>16).astype(np.int16)
+        if x.dtype == 'int32':
+            y = (x[:, chan_id]>>16).astype(np.int16)
+        elif x.dtype == 'int16':
+            y = x[:, chan_id]
+        else:
+            raise NotImplementedError('wav file is neither int16 nor int32 and I dont know how to convert to int16 yet')
     else:
         y = x[:, chan_id]
     

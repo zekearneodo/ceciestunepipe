@@ -380,7 +380,12 @@ def main():
     get_starlings_alsa_bouts(
           days_lookup, force=force_compute, do_today=do_today)
 
-    #get_birds_bouts(['s_b1376_22', 's_b1444_22', 's_b1572_22'], days_lookup, bs.default_hparams, ephys_software='alsa', n_jobs=12, force=True, do_today=do_today)
+    # get_birds_bouts(['s_b1376_22', 's_b1555_22', 's_b1312_22'], days_lookup, bs.default_hparams, 
+    # ephys_software='alsa', 
+    # n_jobs=12, 
+    # force=True, 
+    # do_today=do_today)
+    
     #get_one_day_bouts('s_b1555_22', '2022-08-06')
     # apply filters if any
 
