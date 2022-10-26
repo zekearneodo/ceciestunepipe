@@ -67,7 +67,7 @@ default_struct_par = {'neural': 'ephys',
 
 
 def get_locations_from_hostname():
-    hostname = socket.gethostname()
+    hostname = socket.gethostname().split('.')[0]
     return locations_dict[hostname]
 
 

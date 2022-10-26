@@ -18,6 +18,6 @@ setup(name='ceciestunepipe',
                         'scipy',
                         'tqdm',
                         'h5py',
-                        'parse'
+                        'parse',
                        ],
       zip_safe=False)

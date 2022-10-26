@@ -55,7 +55,7 @@ default_struct_par = {'neural': 'ephys',
 
 
 def get_locations_from_hostname():
-    hostname = socket.gethostname()
+    hostname = socket.gethostname().split('.')[0]
     return locations_dict[hostname]
 
 
@@ -276,10 +276,10 @@ def list_subfolders(folder_path):
     return next(os.walk(os.path.abspath(folder_path)))[1]
 
 
-def sgl_struct(sess_par: dict, epoch: str) -> dict:
+def sgl_struct(sess_par: dict, epoch: str, ephys_software='sglx') -> dict:
     # locations of the folders for the epoch, if ephys is sglx
     exp_struct = get_exp_struct(
-        sess_par['bird'], sess_par['sess'], sort='')
+        sess_par['bird'], sess_par['sess'], ephys_software=ephys_software, sort='')
     
     
 
@@ -380,11 +380,17 @@ def epoch_meta_from_bout_series(s: pd.Series):
     s['epoch'] = epoch
     return s
 
-def get_epoch_bout_pd(sess_par, only_curated=False):
+def get_epoch_bout_pd(sess_par, only_curated=False, software='sglx'):
     epoch = sess_par['epoch']
-    exp_struct = sgl_struct(sess_par, epoch)
-    sess_derived_path = os.path.split(os.path.split(exp_struct['folders']['derived'])[0])[0]
-    bout_pd_path = os.path.join(sess_derived_path, 'bouts_sglx', 'bout_curated.pickle')
+    if software == 'sglx':
+        exp_struct = sgl_struct(sess_par, epoch)
+        sess_derived_path = os.path.split(os.path.split(exp_struct['folders']['derived'])[0])[0]
+        bout_pd_path = os.path.join(sess_derived_path, 'bouts_sglx', 'bout_curated.pickle')
+    
+    elif software == 'oe':
+        exp_struct = get_exp_struct(sess_par['bird'], sess_par['sess'], sort=sess_par['sort'], ephys_software='bouts_oe')
+        bout_pd_path = os.path.join(exp_struct['folders']['derived'], 'bout_curated.pickle')
+
     logger.info('loading curated bouts for session {} from {}'.format(sess_par['sess'],
                                                                                bout_pd_path))
     

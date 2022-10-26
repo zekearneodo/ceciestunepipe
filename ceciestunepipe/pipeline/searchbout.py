@@ -58,11 +58,14 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
         source_folder = exp_struct['folders'][ephys_software]
         wav_path_list = glob.glob(os.path.join(source_folder, '*.wav'))
 
-    if ephys_software == 'sglx':
+    elif ephys_software in  ['sglx', 'oe']:
         # data comes from the derived_data
         source_folder = exp_struct['folders']['derived']
         wav_path_list = et.get_sgl_files_epochs(
             source_folder, file_filter='*wav_mic.wav')
+
+    else:
+        raise NotImplementedError('Dont know how to deal with {} recording software'.format(ephys_software))
 
     logger.info('getting wav files from' + source_folder)
     wav_path_list.sort()
@@ -126,11 +129,13 @@ def save_auto_bouts(sess_bout_pd, sess_par, hparams, software='alsa', bout_file_
         sess_bouts_dir = os.path.join(exp_struct['folders']['derived'],
                                       'bouts_ceciestunepipe')
 
-    elif software == 'sglx':
+    elif software in ['sglx', 'oe']:
         exp_struct = et.get_exp_struct(sess_par['bird'], sess_par['sess'],
-                                       ephys_software='bouts_sglx')
+                                       ephys_software='bouts_' + software)
         sess_bouts_dir = exp_struct['folders']['derived']
 
+    else:
+        raise NotImplementedError('Not know how to save bouts for software ' + software)
     sess_bouts_path = os.path.join(sess_bouts_dir, hparams[bout_file_key])
     hparams_file_name = 'bout_search_params.pickle'
     
