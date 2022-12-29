@@ -5,6 +5,17 @@ import pandas as pd
 
 logger = logging.getLogger('ceciestunepipe.util.h5util')
 
+bout_default_keys = {'attr_keys': ['start_ms', 'end_ms', 'len_ms',
+                                   'start_sample', 'end_sample',
+                                   'start_ms_ap_0', 'start_sample_ap_0',
+                                   'start_sample_naive', 'len_sample_ap_0', 'end_sample_ap_0',
+                                   'bout_check', 'confusing', 'file'],
+                     'dset_keys': ['mic_arr', 'pre_arr', 'pre_filt', 'syl_in',
+                                   'f_xx', 't_xx', 's_xx', 'sxx_pc',
+                                   'spk_arr', 'spk_gpf'],
+                     'dict_keys': ['s_f', 's_f_nidq', 's_f_ap_0', 't_pre', 't_post']
+                     }
+
 
 def h5_decorator(leave_open=True, default_mode='r'):
     """
@@ -33,7 +44,8 @@ def h5_decorator(leave_open=True, default_mode='r'):
                         return_value = h5_function(h5_file, *args, **kwargs)
                     else:
                         with h5py.File(h5_file, mode) as h5_file:
-                            return_value = h5_function(h5_file, *args, **kwargs)
+                            return_value = h5_function(
+                                h5_file, *args, **kwargs)
 
                 else:
                     return_value = h5_function(h5_file, *args, **kwargs)
@@ -81,7 +93,8 @@ def dict_2_group(parent_group, dic, name, replace=False):
     :return:
     """
     # group parent group or path, dict dictionary, name name of new group
-    logger.debug('Translating dictionary key {} into its own group'.format(name))
+    logger.debug(
+        'Translating dictionary key {} into its own group'.format(name))
     try:
         group = parent_group.create_group(name)
     except ValueError as err:
@@ -100,7 +113,8 @@ def dict_2_group(parent_group, dic, name, replace=False):
                 item = dict_2_attr_translator(item)
                 group.attrs.create(key, item)
             except ValueError:
-                logger.info("Wrong type error for key {}, setting None".format(type(item)))
+                logger.info(
+                    "Wrong type error for key {}, setting None".format(type(item)))
                 group.attrs.create(key, None)
         else:
             dict_2_group(group, item, key)
@@ -125,7 +139,8 @@ def obj_attrs_2_dict_translator(h5obj):
             # logger.debug('attr {}'.format(attr))
             dic[attr] = attr_2_dict_translator(value)
         except ValueError:
-            logger.warning("Could not translate value for attribute {}".format(attr))
+            logger.warning(
+                "Could not translate value for attribute {}".format(attr))
             dic[attr] = None
     return dic
 
@@ -141,7 +156,8 @@ def group_2_dict(parent_dic, group, key_name):
     :return:
     """
     # enter a group with the attributes and lay it in a dictionary as key 'key_name'
-    logger.debug('Translating group {} into its own dictionary'.format(key_name))
+    logger.debug(
+        'Translating group {} into its own dictionary'.format(key_name))
     parent_dic[key_name] = dict()
     dic = parent_dic[key_name]
     for attr, value in group.attrs.items():
@@ -149,7 +165,8 @@ def group_2_dict(parent_dic, group, key_name):
             # logger.debug('attr {}'.format(attr))
             dic[attr] = attr_2_dict_translator(value)
         except ValueError:
-            logger.warning("Could not translate value for attribute {}".format(attr))
+            logger.warning(
+                "Could not translate value for attribute {}".format(attr))
             dic[attr] = None
 
     for subgroup_name, subgroup_obj in group.items():
@@ -194,33 +211,64 @@ def append_atrributes(h5obj, attr_dict):
     for key, item in attr_dict.items():
         # print attr_dict['name'] + ' {0} - {1}'.format(attr_dict['data'], attr_dict['dtype'])
         if isinstance(key, dict):
-            logger.warning('Skipping sub-dictionary {0} in appending attributes of {1}'.format(key, h5obj.name))
+            logger.warning(
+                'Skipping sub-dictionary {0} in appending attributes of {1}'.format(key, h5obj.name))
             item = 'Error'
         h5obj.attrs.create(key, dict_2_attr_translator(item))
 
-def bouts_from_h5(bout_h5_path, root_grp_name: str='bout_gpfa', exclude_dset=['spk_arr']):
+
+def bouts_from_h5(bout_h5_path, root_grp_name: str = 'bout_gpfa', exclude_dset=['spk_arr']):
     # open a h5 file.
     # read the group for the dataframe
     # append the bout metada dict keys to the group
     # for each group (bout)
-        # create a dataframe with the salars from the attributes, and 
-        # pointers to the datasets for the tables
-    
+    # create a dataframe with the salars from the attributes, and
+    # pointers to the datasets for the tables
+
     all_bout_df = pd.DataFrame()
-    with h5py.File(bout_h5_path,'r') as f:
+    with h5py.File(bout_h5_path, 'r') as f:
         df_grp = f[root_grp_name]
         grp_attr_dict = obj_attrs_2_dict_translator(df_grp)
         # each key in the df_grp is a group, and each group is a bout
-        #logger.info(bout_idx_list)
+        # logger.info(bout_idx_list)
         for bout_idx in df_grp.keys():
             bout_grp = df_grp[bout_idx]
             bout_attr_dict = obj_attrs_2_dict_translator(bout_grp)
-            bout_data_dict = ({k: bout_grp[k][:] for k in bout_grp.keys() if not (k in exclude_dset)})
+            bout_data_dict = (
+                {k: bout_grp[k][:] for k in bout_grp.keys() if not (k in exclude_dset)})
             bout_data_dict.update(bout_attr_dict)
 
             bout_df = pd.DataFrame(pd.Series(bout_data_dict)).T
             bout_df['bout_idx'] = bout_idx
             all_bout_df = pd.concat([all_bout_df, bout_df])
-    
+
     bout_df.reset_index(inplace=True)
     return all_bout_df, grp_attr_dict
+
+
+def bouts_to_h5(bout_df: pd.DataFrame, bout_dict: dict, h5_path: str,
+                dset_keys: list = bout_default_keys['dset_keys'],
+                attr_keys: list = bout_default_keys['attr_keys'],
+                bout_dict_keys: list = bout_default_keys['dict_keys'],
+                root_grp_name: str = 'bout_gpfa'):
+
+    # make a h5 file.
+    # create a group for the dataframe
+    # append the bout metada dict keys to the group
+    # for each row (bout)
+    # create a group with the index of the bout
+    # apend attr_keys with values for the bout as attributes (mostly scalars)
+    # create datasets for all the long arrays that contain data over time
+
+    with h5py.File(h5_path, 'w') as f:
+        df_grp = f.create_group(root_grp_name)
+        grp_attr_dict = {k: bout_dict[k] for k in bout_dict_keys}
+        append_atrributes(df_grp, grp_attr_dict)
+        #dset_keys = ['mic_arr', 'pre_arr']
+
+        for idx, row in bout_df.iterrows():
+            bout_grp = df_grp.create_group(str(idx))
+            [bout_grp.create_dataset(k, data=row[k]) for k in dset_keys]
+
+            bout_attr_dict = {k: row[k] for k in attr_keys}
+            append_atrributes(bout_grp, bout_attr_dict)

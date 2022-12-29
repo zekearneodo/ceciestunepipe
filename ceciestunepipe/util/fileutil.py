@@ -40,3 +40,18 @@ def save_pickle(obj, pickle_path):
     with open(pickle_path, 'wb') as fh:
         pickle.dump(obj, fh)
     chmod(pickle_path, mode=0o777)
+
+def get_path_parts(file_path: str):
+    folders = []
+    while 1:
+        file_path, folder = os.path.split(file_path)
+
+        if folder != "":
+            folders.append(folder)
+        elif file_path != "":
+            folders.append(file_path)
+
+            break
+
+    folders.reverse()
+    return folders

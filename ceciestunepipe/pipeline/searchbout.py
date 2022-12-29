@@ -14,6 +14,7 @@ import socket
 import sys
 import datetime
 
+from matplotlib import pyplot as plt
 from joblib import Parallel, delayed
 from scipy.io import wavfile
 from tqdm.auto import tqdm
@@ -58,14 +59,15 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
         source_folder = exp_struct['folders'][ephys_software]
         wav_path_list = glob.glob(os.path.join(source_folder, '*.wav'))
 
-    elif ephys_software in  ['sglx', 'oe']:
+    elif ephys_software in ['sglx', 'oe']:
         # data comes from the derived_data
         source_folder = exp_struct['folders']['derived']
         wav_path_list = et.get_sgl_files_epochs(
             source_folder, file_filter='*wav_mic.wav')
 
     else:
-        raise NotImplementedError('Dont know how to deal with {} recording software'.format(ephys_software))
+        raise NotImplementedError(
+            'Dont know how to deal with {} recording software'.format(ephys_software))
 
     logger.info('getting wav files from' + source_folder)
     wav_path_list.sort()
@@ -92,7 +94,7 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
 
     #sess_pd_list = [bs.get_bouts_in_file(i, hparams)[0] for i in wav_path_list]
     # update the sample rate
-    ## quick and dirty, find the first one that is possible
+    # quick and dirty, find the first one that is possible
     for i_path in wav_path_list:
         try:
             hparams['sample_rate'] = bs.sample_rate_from_wav(i_path)
@@ -117,7 +119,8 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
     # finally, save
     sess_bout_pd.reset_index(drop=True, inplace=True)
     if save:
-        save_auto_bouts(sess_bout_pd, sess_par, hparams, software=ephys_software, bout_file_key='bout_auto_file')
+        save_auto_bouts(sess_bout_pd, sess_par, hparams,
+                        software=ephys_software, bout_file_key='bout_auto_file')
     return sess_bout_pd
 
 
@@ -135,10 +138,11 @@ def save_auto_bouts(sess_bout_pd, sess_par, hparams, software='alsa', bout_file_
         sess_bouts_dir = exp_struct['folders']['derived']
 
     else:
-        raise NotImplementedError('Not know how to save bouts for software ' + software)
+        raise NotImplementedError(
+            'Not know how to save bouts for software ' + software)
     sess_bouts_path = os.path.join(sess_bouts_dir, hparams[bout_file_key])
     hparams_file_name = 'bout_search_params.pickle'
-    
+
     hparams_pickle_path = os.path.join(
         sess_bouts_dir, hparams_file_name)
 
@@ -149,7 +153,7 @@ def save_auto_bouts(sess_bout_pd, sess_par, hparams, software='alsa', bout_file_
 
     logger.info('saving bout detect parameters dict to ' + hparams_pickle_path)
     bs.save_bouts_params_dict(hparams, hparams_pickle_path)
-    #with open(hparams_pickle_path, 'wb') as fh:
+    # with open(hparams_pickle_path, 'wb') as fh:
     #    pickle.dump(hparams, fh)
     #fu.chmod(hparams_pickle_path, 0o777)
 
@@ -209,13 +213,14 @@ def load_bouts(bird: str, sess: str, ephys_software: str, derived_folder: str = 
     exp_struct = et.get_exp_struct(bird, sess, ephys_software=ephys_software)
     bouts_folder = os.path.join(
         exp_struct['folders']['derived'], derived_folder)
+    # logger.info(bouts_folder)
 
     # try loading the params, bouts file
     # if exist, return that one, otherwise return None
     hparams_file_path = os.path.join(bouts_folder, 'bout_search_params.pickle')
 
     # start with none to return None by default
-    bouts_pd = None
+    bouts_pd = None  # this one starts as empty dataframe
     hparams = None
 
     try:
@@ -334,9 +339,10 @@ def read_session_bouts(bird: str, sess: str, recording_software='alsa', curated:
     bout_file_key = 'bout_curated_file' if curated else 'bout_auto_file'
     hparams, bout_pd = load_bouts(bird, sess, recording_software,
                                   derived_folder='bouts_ceciestunepipe', bout_file_key=bout_file_key)
+    # this could be something (none or empty) or none.
+    bout_pd = pd.DataFrame() if bout_pd is None else bout_pd
+
     if not curated:
-        # this could be something (none or empty) or none.
-        bout_pd = pd.DataFrame() if bout_pd is None else bout_pd
         if bout_pd.index.size > 0:
             bs.cleanup(bout_pd)
         # if it comes up nonempty after cleanup, get spectrograms, etc
@@ -365,6 +371,269 @@ def read_session_bouts(bird: str, sess: str, recording_software='alsa', curated:
     return hparams, bout_pd
 
 
+# for summary and so forth
+default_bout_sess_par = {'bird': None,
+                         'acq_software': 'alsa',
+                         'derived_folder': 'bouts_ceciestunepipe',
+                         'auto_file': 'bout_auto_file',
+                         'curated_file': 'bout_curated_file',
+                         'super_session': 'all-sess-01'}
+
+
+def list_sessions(sess_par: dict) -> np.array:
+    sess_arr = np.array(et.list_sessions(sess_par['bird'], section='raw',
+                                         ephys_software=sess_par['acq_software']))
+    sess_arr.sort()
+    return sess_arr
+
+
+def get_bird_sess_pd(sess_par: dict) -> pd.DataFrame:
+    # go through all sessions with raw data and check which one has auto bouts, curated bouts.
+    # get the sess_arr of raw, which ever raw is
+    sess_arr = list_sessions(sess_par)
+    sess_pd = pd.DataFrame({'sess': sess_arr})
+    sess_pd['acq_soft'] = sess_par['acq_software']
+
+    # see which has auto bouts
+    sess_pd['has_auto_bouts'] = sess_pd['sess'].apply(lambda x: has_bouts_file(sess_par['bird'], x, sess_par['acq_software'],
+                                                                               derived_folder=sess_par['derived_folder'],
+                                                                               bout_type=sess_par['auto_file'])
+                                                      )
+
+    if 'curated_file' in sess_par.keys():
+        sess_pd['has_curated_bouts'] = sess_pd['sess'].apply(lambda x: has_bouts_file(sess_par['bird'], x, sess_par['acq_software'],
+                                                                                      derived_folder=sess_par['derived_folder'],
+                                                                                      bout_type=sess_par['curated_file'])
+                                                             )
+    else:
+        sess_pd['has_curated_bouts'] = None
+    return sess_pd
+
+
+def load_bouts_ds(s_ds: pd.Series, sess_par: dict,
+                  file_key: str = 'auto_file', exclude_cols=[]) -> pd.DataFrame:
+    # Load the bouts for a data series, exclude the cols, if any and return the loaded bout
+    logger.debug('sess {}'.format(s_ds['sess']))
+    hparams, b_pd = load_bouts(sess_par['bird'], s_ds['sess'], sess_par['acq_software'],
+                               derived_folder=sess_par['derived_folder'],
+                               bout_file_key=sess_par[file_key])
+
+    # this should be fixed in sb.read_session_bouts
+    b_pd = pd.DataFrame() if b_pd is None else b_pd
+    if b_pd.index.size == 0:
+        logger.warning('Bout pandas {} pickle was empty for sess {} parameters {}'.format(file_key,
+                                                                                          s_ds['sess'],
+                                                                                          sess_par))
+    else:
+        b_pd['sess'] = s_ds['sess']
+        b_pd.drop(columns=exclude_cols, inplace=True)
+        if sess_par['acq_software'] == 'alsa':
+            # there is a bug in the pipeline and for bird s_b1555_22, in april 2022 some bout pd in alsa
+            # contain pointers to the sglx files.
+            # they can be identified by the wav_mic.wav file, instead of H-m-s-part.wav
+            # if that is detected, warn and return empty dataframe. We'll have no timestamps for those yet.
+            wav_files = np.unique(
+                [os.path.split(x)[-1].split('.wav')[0] for x in b_pd['file']])
+            if 'wav_mic' in wav_files:
+                logger.warning('Bout pandas {} pickle is screwed up for sess {} parameters {}'.format(file_key,
+                                                                                                      s_ds['sess'],
+                                                                                                      sess_par))
+                logger.warning(
+                    'It seems to contain bouts from ephys wav files: {}'.format(wav_files))
+                # for now, ignore. In the future, we will get the timestamp for those files
+                b_pd = pd.DataFrame()
+            else:
+                b_pd = bs.alsa_bout_time_stamps(b_pd)
+    return b_pd
+
+
+def load_all_bouts(sess_par: dict,
+                   exclude_cols: list = ['waveform', 'spectrogram', 'p_step'],
+                   meta_pd: pd.DataFrame = None,
+                   save: bool = True) -> tuple:
+    # get the pandas with the sessions
+    logger.info(
+        'Looking for all sessions with bouts detected/curated for bird {}'.format(sess_par['bird']))
+
+    if meta_pd is None:
+        s_pd = get_bird_sess_pd(sess_par)
+        sess_sel = True
+    else:
+        logger.info('Will only do sessions {}'.format(list(meta_pd['sess'])))
+        s_pd = meta_pd
+        sess_sel = True
+
+    n_auto = np.sum((s_pd['has_auto_bouts'] == True) & (sess_sel))
+    n_curated = np.sum((s_pd['has_curated_bouts'] == True) & (sess_sel))
+    logger.info('Found {} sessions with detected, {} with curated bouts'.format(
+        n_auto, n_curated))
+
+    # load all curated, drop the
+    sel_auto = (s_pd['has_auto_bouts']) & sess_sel
+    auto_bout_pd_list = list(s_pd.loc[sel_auto].apply(lambda s: load_bouts_ds(s, sess_par,
+                                                                              exclude_cols=exclude_cols,
+                                                                              file_key='auto_file'),
+                                                      axis=1))
+    auto_bout_pd = pd.concat(auto_bout_pd_list).rename(
+        columns={'bout_check': 'bout_auto'})
+
+    # auto bout ready to merge with curated bouts, wherever they exist
+    # load the curated, wherever they exist, and if it is within the session parameters plan
+    if 'curated_file' in sess_par.keys():
+        sel_curated = (s_pd['has_curated_bouts']) & (sess_sel)
+        check_bout_pd_list = list(s_pd.loc[sel_curated].apply(lambda s: load_bouts_ds(s, sess_par,
+                                                                                      exclude_cols=exclude_cols,
+                                                                                      file_key='curated_file'),
+                                                              axis=1))
+        check_bout_pd = pd.concat(check_bout_pd_list)
+        # do the merge now
+        bout_pd = auto_bout_pd.merge(check_bout_pd[['t_stamp', 'is_call', 'confusing', 'bout_check']],
+                                     on='t_stamp',
+                                     how='outer')
+    else:
+        bout_pd = auto_bout_pd
+
+    bout_pd['datetime'] = pd.to_datetime(bout_pd['t_stamp'])
+    bout_pd['day'] = bout_pd['datetime'].apply(
+        lambda dt: dt.strftime('%Y-%m-%d'))
+    bout_pd['hour'] = bout_pd['datetime'].apply(lambda x: x.hour)
+
+    # save it
+    if save:
+        save_bouts_summary(s_pd, bout_pd, sess_par['bird'],
+                           sess=sess_par['super_session'],
+                           acq_soft=sess_par['acq_software'],
+                           derived_folder=sess_par['derived_folder'])
+
+    return s_pd, bout_pd
+
+
+def update_bouts(sess_par: dict, exclude_cols: list = ['waveform', 'spectrogram', 'p_step']) -> tuple:
+    logger.info(
+        'Looking for all sessions with bouts detected/curated for bird {}'.format(sess_par['bird']))
+
+    # try loading. If there is anything, update it. If there is nothing, just do it
+    try:
+        # if there is anything, prep to update
+        prev_meta_df, prev_bout_df = load_bouts_summary(sess_par['bird'],
+                                                        sess=sess_par['super_session'],
+                                                        acq_soft=sess_par['acq_software'],
+                                                        derived_folder=sess_par['derived_folder'])
+
+    except:
+        # If nothing, just flag to load from scratch with prev_meta_df = None
+        logger.warn(
+            'Could not load meta/bouts files. Will just make everythin from scratch')
+        prev_meta_df = None
+
+    if prev_meta_df is None:
+        # if flagged, load from scratch and that's it
+        meta_df, bout_df = load_all_bouts(
+            sess_par, exclude_cols=exclude_cols)
+
+    else:
+        # otherwise, update from the prev_meta_df, prev_bout_df
+        new_meta_df = get_bird_sess_pd(sess_par)
+        revisit_sess = np.unique(
+            pd.concat([prev_meta_df, new_meta_df]).drop_duplicates(keep=False)['sess'])
+        # remove anything with those sessions from the bout_df, meta_df.
+        prev_bout_df.drop(prev_bout_df['sess'].isin(
+            revisit_sess).index, inplace=True)
+        # get meta_df, bout_df for just those sessions
+        redo_meta_df = new_meta_df[new_meta_df['sess'].isin(revisit_sess)]
+        # if there is anything new update, otherwise just return what was loaded (no need to save)
+        if redo_meta_df.index.size > 0:
+            logger.info('There are {} sessions to update'.format(
+                redo_meta_df.index.size))
+            _, redo_bout_df = load_all_bouts(sess_par,
+                                             exclude_cols=exclude_cols,
+                                             meta_pd=redo_meta_df,
+                                             save=False)
+            # concatenate
+            meta_df = new_meta_df
+            bout_df = pd.concat([prev_bout_df, redo_bout_df])
+            # save
+            save_bouts_summary(meta_df, bout_df, sess_par['bird'],
+                               sess=sess_par['super_session'],
+                               acq_soft=sess_par['acq_software'],
+                               derived_folder=sess_par['derived_folder'])
+        else:
+            logger.info('Nothing to update')
+            meta_df = prev_meta_df
+            bout_df = prev_bout_df
+
+    # drop the sessions to update from the
+    return meta_df, bout_df
+
+
+def bout_summary_path(bird: str, sess: str = 'all-sess-01', acq_soft: str = 'alsa', derived_folder: str = 'bouts_ceciestunepipe') -> str:
+    exp_struct = et.get_exp_struct(bird, sess, ephys_software=acq_soft)
+    bout_file_path = os.path.join(
+        exp_struct['folders']['processed'], derived_folder, 'bout_summary_df.pickle')
+    meta_file_path = os.path.join(
+        exp_struct['folders']['processed'], derived_folder, 'bout_meta_df.pickle')
+    logger.info('Meta, bout summary path is {}, {}'.format(
+        meta_file_path, bout_file_path))
+    return meta_file_path, bout_file_path
+
+
+def load_bouts_summary(bird: str, sess: str = 'all-sess-01', acq_soft: str = 'alsa', derived_folder: str = 'bouts_ceciestunepipe') -> pd.DataFrame:
+    # file location
+    logger.info('Loading bout summary dataframe')
+    pickle_paths = bout_summary_path(
+        bird, sess=sess, acq_soft=acq_soft, derived_folder=derived_folder)
+    meta_df = pd.read_pickle(pickle_paths[0])
+    bout_df = pd.read_pickle(pickle_paths[1])
+    return meta_df, bout_df
+
+
+def save_bouts_summary(meta_df: pd.DataFrame, bout_df: pd.DataFrame, bird: str,
+                       sess='all-sess-01',
+                       acq_soft='alsa',
+                       derived_folder='bouts_ceciestunepipe') -> pd.DataFrame:
+    # file location
+    logger.info('Saving bout summary dataframe')
+    pickle_paths = bout_summary_path(
+        bird, sess=sess, acq_soft=acq_soft, derived_folder=derived_folder)
+    fu.makedirs(os.path.split(pickle_paths[0])[0])
+    meta_df.to_pickle(pickle_paths[0])
+    bout_df.to_pickle(pickle_paths[1])
+    return pickle_paths
+
+
+def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 0, ax_dict: dict = None) -> dict:
+    if ax_dict is None:
+        fig, axs = plt.subplots(nrows=2, figsize=(16, 8))
+        ax_dict = {'hourly': axs[0],
+                   'daily': axs[1]}
+        fig.suptitle('Bouts summary zoomed to last {} days'.format(zoom_days))
+
+    bout_pd['bout_check'].fillna(False, inplace=True)
+    ### filter date to the last n days
+    if zoom_days is None:
+        from_date = bout_pd['datetime'].dt.date.min() - datetime.timedelta(days=1)
+    else:
+        from_date = bout_pd['datetime'].dt.date.max() - datetime.timedelta(days=zoom_days)
+
+    date_filter = bout_pd['datetime'].dt.date > from_date
+    bout_pd = bout_pd[date_filter]
+    ax_h = ax_dict['hourly']
+    bout_pd.groupby(bout_pd['datetime'].dt.hour)['bout_auto'].sum().plot(kind='bar', ax=ax_h, alpha=0.5, label='auto')
+    bout_pd.groupby(bout_pd['datetime'].dt.hour)['bout_check'].sum().plot(kind='bar', ax=ax_h, alpha=0.5, color='red', label='curated')
+    ax_h.set_xlabel('Hour')
+    ax_h.set_ylabel('bouts')
+    ax_h.legend()
+
+    ax_d = ax_dict['daily']
+    bout_pd.groupby(bout_pd['datetime'].dt.date)['bout_auto'].sum().plot(kind='bar', ax=ax_d, alpha=0.5)
+    bout_pd.groupby(bout_pd['datetime'].dt.date)['bout_check'].sum().plot(kind='bar', ax=ax_d, alpha=0.5, color='red')
+    ax_d.set_xlabel('Day')
+    ax_d.set_ylabel('bouts')
+    
+    plt.tight_layout()
+    return ax_dict
+
+
 def main():
     """Launcher"""
     # make a logger
@@ -383,14 +652,14 @@ def main():
     force_compute = False
 
     get_starlings_alsa_bouts(
-          days_lookup, force=force_compute, do_today=do_today)
+        days_lookup, force=force_compute, do_today=do_today)
 
-    # get_birds_bouts(['s_b1376_22', 's_b1555_22', 's_b1312_22'], days_lookup, bs.default_hparams, 
-    # ephys_software='alsa', 
-    # n_jobs=12, 
-    # force=True, 
+    # get_birds_bouts(['s_b1376_22', 's_b1555_22', 's_b1312_22'], days_lookup, bs.default_hparams,
+    # ephys_software='alsa',
+    # n_jobs=12,
+    # force=True,
     # do_today=do_today)
-    
+
     #get_one_day_bouts('s_b1555_22', '2022-08-06')
     # apply filters if any
 
