@@ -519,6 +519,7 @@ def update_bouts(sess_par: dict, exclude_cols: list = ['waveform', 'spectrogram'
                                                         sess=sess_par['super_session'],
                                                         acq_soft=sess_par['acq_software'],
                                                         derived_folder=sess_par['derived_folder'])
+        #logger.info(prev_meta_df['sess'])
 
     except:
         # If nothing, just flag to load from scratch with prev_meta_df = None
@@ -528,35 +529,43 @@ def update_bouts(sess_par: dict, exclude_cols: list = ['waveform', 'spectrogram'
 
     if prev_meta_df is None:
         # if flagged, load from scratch and that's it
-        meta_df, bout_df = load_all_bouts(
-            sess_par, exclude_cols=exclude_cols)
+        meta_df, bout_df = load_all_bouts(sess_par, exclude_cols=exclude_cols)
 
     else:
         # otherwise, update from the prev_meta_df, prev_bout_df
         new_meta_df = get_bird_sess_pd(sess_par)
-        revisit_sess = np.unique(
-            pd.concat([prev_meta_df, new_meta_df]).drop_duplicates(keep=False)['sess'])
-        # remove anything with those sessions from the bout_df, meta_df.
-        prev_bout_df.drop(prev_bout_df['sess'].isin(
-            revisit_sess).index, inplace=True)
-        # get meta_df, bout_df for just those sessions
-        redo_meta_df = new_meta_df[new_meta_df['sess'].isin(revisit_sess)]
+        revisit_sess = np.unique(pd.concat([prev_meta_df, new_meta_df]).drop_duplicates(keep=False)['sess'])
+        
         # if there is anything new update, otherwise just return what was loaded (no need to save)
-        if redo_meta_df.index.size > 0:
-            logger.info('There are {} sessions to update'.format(
-                redo_meta_df.index.size))
+        if revisit_sess.size > 0:
+            logger.info('Will revisit sessions {}'.format(revisit_sess))
+            # remove anything with those sessions from the bout_df, meta_df.
+            #logger.info('pev bout before dropping {}'.format(np.unique(prev_bout_df['sess'])))
+            prev_bout_df = prev_bout_df[~prev_bout_df['sess'].isin(revisit_sess)]
+            prev_bout_df.reset_index(drop=True, inplace=True)
+            #logger.info('pev bout after dropping {}'.format(np.unique(prev_bout_df['sess'])))
+
+            # get meta_df, bout_df for just those sessions
+            redo_meta_df = new_meta_df[new_meta_df['sess'].isin(revisit_sess)]
+            logger.info('There are {} sessions to update'.format(redo_meta_df.index.size))
             _, redo_bout_df = load_all_bouts(sess_par,
                                              exclude_cols=exclude_cols,
                                              meta_pd=redo_meta_df,
                                              save=False)
+            
             # concatenate
             meta_df = new_meta_df
+            meta_df.reset_index(drop=True, inplace=True)
             bout_df = pd.concat([prev_bout_df, redo_bout_df])
+            bout_df.reset_index(drop=True, inplace=True)
+            #logger.info('concat bout {}'.format(np.unique(bout_df['sess'])))
             # save
+            
             save_bouts_summary(meta_df, bout_df, sess_par['bird'],
                                sess=sess_par['super_session'],
                                acq_soft=sess_par['acq_software'],
                                derived_folder=sess_par['derived_folder'])
+        
         else:
             logger.info('Nothing to update')
             meta_df = prev_meta_df
@@ -601,7 +610,7 @@ def save_bouts_summary(meta_df: pd.DataFrame, bout_df: pd.DataFrame, bird: str,
     return pickle_paths
 
 
-def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 0, ax_dict: dict = None) -> dict:
+def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 'all', ax_dict: dict = None) -> dict:
     if ax_dict is None:
         fig, axs = plt.subplots(nrows=2, figsize=(16, 8))
         ax_dict = {'hourly': axs[0],
@@ -610,7 +619,7 @@ def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 0, ax_dict: dict = N
 
     bout_pd['bout_check'].fillna(False, inplace=True)
     ### filter date to the last n days
-    if zoom_days is None:
+    if zoom_days == 'all':
         from_date = bout_pd['datetime'].dt.date.min() - datetime.timedelta(days=1)
     else:
         from_date = bout_pd['datetime'].dt.date.max() - datetime.timedelta(days=zoom_days)
