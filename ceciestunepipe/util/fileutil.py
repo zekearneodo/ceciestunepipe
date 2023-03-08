@@ -23,6 +23,13 @@ def chmod(file_path, mode=0o777):
     finally:
         os.umask(original_mask)
 
+def glob_except(path:str, glob_str:str='*.*', exclude_list=[]):
+    all_files = glob.glob(os.path.join(path, glob_str))
+    except_list = [glob.glob(os.path.join(path, s)) for s in exclude_list]
+    flat_except = [f for sublist in except_list for f in sublist]
+    some_files = [f for f in all_files if f not in flat_except]
+    return some_files, flat_except
+
 # copy path to dest, skip f existed
 def safe_copy(src_path: str, dest_path: str):
     if not os.path.exists(dest_path):

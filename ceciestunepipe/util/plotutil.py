@@ -69,20 +69,16 @@ def coarse(x: np.ndarray, n_coarse: int):
 def plot_as_raster(x, ax=None, t_0=None, t_f=None):
     #x is [n_events, n_timestamps] array
     n_y, n_t = x.shape
-    
-    row = np.ones(n_t) + 1
-    t = np.arange(n_t)
-    col = np.arange(n_y)
-    
-    frame = col[:, np.newaxis] + row[np.newaxis, :]
     x[x==0] = np.nan
     
     if ax is None:
         fig, ax = plt.subplots()
+        ax.set_xlim(0, n_t)
+        ax.set_ylim(0, n_y + 1)
         
+    x_trial, x_time = np.where(x>0)
+    raster = ax.plot(x_time, x_trial, '.', color='k', markersize=0.75, rasterized=True)
     
-    raster = ax.scatter(t * x, frame * x, marker='.', facecolor='k', s=1, rasterized=True)
-
     if t_0 is not None:
         ax.axvline(x=t_0, color='red')
 

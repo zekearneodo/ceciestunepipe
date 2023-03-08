@@ -127,7 +127,6 @@ def get_rasters(spk_df, clu_list, start_samp_arr, span_samples):
         spk_df, clu_list, x, x+span_samples) for x in start_samp_arr]
     return np.stack(spk_arr_list, axis=-1)
 
-### Fix compatibility isssues. This works with spikeinterface 0.93x, good for OE with newer spikeextractors.
 def run_spikesort(recording_extractor: se.RecordingExtractor,
                   logger: logging.Logger,
                   sort_pickle_path: str,
@@ -203,35 +202,35 @@ def run_spikesort(recording_extractor: se.RecordingExtractor,
         pickle.dump(sort, output, pickle.HIGHEST_PROTOCOL)
     logger.info("Sorting output saved to {}".format(sort_pickle_path))
 
-#     # get templates and max channel
-#     logger.info("Getting templates")
-#     templates = st.postprocessing.get_unit_templates(
-#         recording_extractor,
-#         sort,
-#         max_spikes_per_unit=200,
-#         save_as_property=True,
-#         verbose=True,
-#         n_jobs=n_jobs_bin,
-#         grouping_property=grouping_property,
-#     )
+    # # get templates and max channel
+    # logger.info("Getting templates")
+    # templates = st.postprocessing.get_unit_templates(
+    #     recording_extractor,
+    #     sort,
+    #     max_spikes_per_unit=200,
+    #     save_as_property=True,
+    #     verbose=True,
+    #     n_jobs=n_jobs_bin,
+    #     grouping_property=grouping_property,
+    # )
 
-#     logger.info("Getting main channel")
-#     max_chan = st.postprocessing.get_unit_max_channels(
-#         recording_extractor,
-#         sort,
-#         save_as_property=True,
-#         verbose=True,
-#         n_jobs=n_jobs_bin
-#     )
+    # logger.info("Getting main channel")
+    # max_chan = st.postprocessing.get_unit_max_channels(
+    #     recording_extractor,
+    #     sort,
+    #     save_as_property=True,
+    #     verbose=True,
+    #     n_jobs=n_jobs_bin
+    # )
 
     # save sort again with all that processed data
-    sort_temp_pickle_path = sort_pickle_path + '.dump.pkl'
-    logger.info("Saving sort {}".format(sort_temp_pickle_path))
-    sort.dump_to_pickle(sort_temp_pickle_path)
+    #sort_temp_pickle_path = sort_pickle_path + '.dump.pkl'
+    #logger.info("Saving sort {}".format(sort_temp_pickle_path))
+    #sort.dump_to_pickle(sort_temp_pickle_path)
 
     return sort
 
-### Fix compatibility isssues. This works with spikeinterface 0.93x, good for OE with newer spikeextractors.
+# ## Fix compatibility isssues. This works with spikeinterface 0.93x, good for OE with newer spikeextractors.
 # def run_spikesort_base_recording(recording_extractor: BaseRecording,
 #                   logger: logging.Logger,
 #                   sort_pickle_path: str,
@@ -358,7 +357,9 @@ def get_clu_features(clu_ds: pd.Series, spk_df: pd.DataFrame, s_f_ap: float,
     clu_feat = {'isi_hist': isi_hist,
                'violation_fraction': violations_fraction,
                'is_good': is_good, 
-               'cluster_id': clu_ds['cluster_id']}
+               'cluster_id': clu_ds['cluster_id'],
+                'n_spike': spk_arr.shape[0]}
+    
     return clu_feat
 
 def get_spk_features(clu_ds: pd.Series, plot=False, ax=None) -> dict:

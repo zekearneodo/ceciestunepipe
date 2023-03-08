@@ -15,6 +15,7 @@ import sys
 import datetime
 
 from matplotlib import pyplot as plt
+from matplotlib.gridspec import GridSpec
 from joblib import Parallel, delayed
 from scipy.io import wavfile
 from tqdm.auto import tqdm
@@ -46,7 +47,11 @@ class BoutParamsUnpickler(pickle.Unpickler):
             return super().find_class(module, name)
 
 
-def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jobs: int = 12, save=True) -> pd.DataFrame:
+def get_all_day_bouts(sess_par: dict, hparams: dict, 
+                      ephys_software='alsa', 
+                      file_ext='wav', 
+                      n_jobs: int = 12, 
+                      save=True) -> pd.DataFrame:
 
     logger.info('Will search for bouts through all session {}, {}'.format(
         sess_par['bird'], sess_par['sess']))
@@ -55,6 +60,8 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
 
     # get all the paths to the wav files of the day
     if ephys_software == 'alsa':
+        if not file_ext=='wav':
+            raise ValueError('alsa files should be wav extension and NOT {}, ainnit?'.format(file_ext))
         # data comes from the raw_data
         source_folder = exp_struct['folders'][ephys_software]
         wav_path_list = glob.glob(os.path.join(source_folder, '*.wav'))
@@ -63,13 +70,13 @@ def get_all_day_bouts(sess_par: dict, hparams: dict, ephys_software='alsa', n_jo
         # data comes from the derived_data
         source_folder = exp_struct['folders']['derived']
         wav_path_list = et.get_sgl_files_epochs(
-            source_folder, file_filter='*wav_mic.wav')
+            source_folder, file_filter='*wav_mic.{}'.format(file_ext))
 
     else:
         raise NotImplementedError(
             'Dont know how to deal with {} recording software'.format(ephys_software))
 
-    logger.info('getting wav files from' + source_folder)
+    logger.info('getting {} files from {}'.format(file_ext, source_folder))
     wav_path_list.sort()
     logger.info('Found {} files'.format(len(wav_path_list)))
 
@@ -289,12 +296,17 @@ def all_bird_bouts_search(bird: str, days_lookup: int, hparams: dict, ephys_soft
         bird, section='raw', ephys_software=ephys_software))
     sess_arr.sort()
 
-    sess_arr = sess_arr[(sess_arr >= from_date_str)
-                        & (sess_arr <= to_date_str)]
-    do_sess_list = list(sess_arr)
+    if sess_arr.size==0:
+        logger.info('No sessions for bird {}; will skip search_birds_bout'.format(bird))
+        search_result = None
+    else:
+        sess_arr = sess_arr[(sess_arr >= from_date_str)
+                            & (sess_arr <= to_date_str)]
+        do_sess_list = list(sess_arr)
 
-    search_result = search_bird_bouts(
-        bird, do_sess_list, hparams, ephys_software=ephys_software, n_jobs=n_jobs, force=force)
+        search_result = search_bird_bouts(
+            bird, do_sess_list, hparams, ephys_software=ephys_software, n_jobs=n_jobs, force=force)
+    
     return search_result
 
 
@@ -308,12 +320,16 @@ def get_birds_bouts(birds_list: list, days_lookup: int, hparams: dict, ephys_sof
     return search_result
 
 
-def get_starlings_alsa_bouts(days_lookup: int, n_jobs: int = 4, force: boolean = False, do_today=False) -> int:
+def get_starlings_alsa_bouts(days_lookup: int, n_jobs: int = 4, force: boolean = False, do_today=False, 
+                             birds_list: list=[]) -> int:
     # get all birds
-    all_birds_list = et.list_birds(section='raw', ephys_software='alsa')
+    if len(birds_list) > 0:
+        logger.info('Entered bird list {}'.format(birds_list))
+    else:
+        birds_list = et.list_birds(section='raw', ephys_software='alsa')
 
     # apply a filter to get the starlings
-    starling_list = [b for b in all_birds_list if b.split('_')[0] == 's']
+    starling_list = [b for b in birds_list if b.split('_')[0] == 's']
 
     # get all_sessions for the bird list
     starling_hparams = bs.default_hparams
@@ -604,18 +620,27 @@ def save_bouts_summary(meta_df: pd.DataFrame, bout_df: pd.DataFrame, bird: str,
     logger.info('Saving bout summary dataframe')
     pickle_paths = bout_summary_path(
         bird, sess=sess, acq_soft=acq_soft, derived_folder=derived_folder)
-    fu.makedirs(os.path.split(pickle_paths[0])[0])
+    fu.makedirs(os.path.split(pickle_paths[0])[0], exist_ok=True, mode=0o777)
     meta_df.to_pickle(pickle_paths[0])
     bout_df.to_pickle(pickle_paths[1])
+    for p in pickle_paths:
+        try:
+            fu.chmod(p, 0o777)
+        except PermissionError:
+        # can't change permission because you don't own the file
+            logger.warning('Cant change permission to file {} because you dont own it'.format(p))
     return pickle_paths
 
 
-def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 'all', ax_dict: dict = None) -> dict:
+def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 'all', bout_len_min: int=0, ax_dict: dict = None) -> dict:
     if ax_dict is None:
-        fig, axs = plt.subplots(nrows=2, figsize=(16, 8))
-        ax_dict = {'hourly': axs[0],
-                   'daily': axs[1]}
-        fig.suptitle('Bouts summary zoomed to last {} days'.format(zoom_days))
+        fig = plt.figure(figsize=(12, 9))
+        gs = GridSpec(3, 3, figure=fig)
+        ax_dict = { 'hourly': fig.add_subplot(gs[0, :2]),
+                    'len': fig.add_subplot(gs[0, -1]),
+                   'daily': fig.add_subplot(gs[1,:]),
+                   'daily_len': fig.add_subplot(gs[2,:])}
+        fig.suptitle('Bouts summary zoomed to last {} days and longer than {} ms'.format(zoom_days, bout_len_min))
 
     bout_pd['bout_check'].fillna(False, inplace=True)
     ### filter date to the last n days
@@ -625,19 +650,40 @@ def plot_bout_stats(bout_pd: pd.DataFrame, zoom_days: int = 'all', ax_dict: dict
         from_date = bout_pd['datetime'].dt.date.max() - datetime.timedelta(days=zoom_days)
 
     date_filter = bout_pd['datetime'].dt.date > from_date
-    bout_pd = bout_pd[date_filter]
+    len_filter = bout_pd['len_ms'] > bout_len_min
+    all_filter = date_filter & len_filter
+    bout_pd = bout_pd[all_filter]
+      
     ax_h = ax_dict['hourly']
-    bout_pd.groupby(bout_pd['datetime'].dt.hour)['bout_auto'].sum().plot(kind='bar', ax=ax_h, alpha=0.5, label='auto')
-    bout_pd.groupby(bout_pd['datetime'].dt.hour)['bout_check'].sum().plot(kind='bar', ax=ax_h, alpha=0.5, color='red', label='curated')
+    bout_pd.groupby(bout_pd['datetime'].dt.hour)['bout_auto'].sum().plot(kind='bar', ax=ax_h, alpha=0.5)
+    bout_pd.groupby(bout_pd['datetime'].dt.hour)['bout_check'].sum().plot(kind='bar', ax=ax_h, alpha=0.5, color='red')
     ax_h.set_xlabel('Hour')
     ax_h.set_ylabel('bouts')
-    ax_h.legend()
 
+    ax_l = ax_dict['len']
+    bout_pd.groupby(bout_pd['len_ms']//1000)['bout_auto'].sum().plot(ax=ax_l, alpha=0.5)
+    bout_pd.groupby(bout_pd['len_ms']//1000)['bout_check'].sum().plot(ax=ax_l, alpha=0.5, color='red')
+    ax_l.set_xlabel('Length (seconds)')
+    ax_l.set_ylabel('bouts')
+    ax_l.set_xlim(0, np.max(bout_pd['len_ms']//1000)+5)
+    
     ax_d = ax_dict['daily']
-    bout_pd.groupby(bout_pd['datetime'].dt.date)['bout_auto'].sum().plot(kind='bar', ax=ax_d, alpha=0.5)
-    bout_pd.groupby(bout_pd['datetime'].dt.date)['bout_check'].sum().plot(kind='bar', ax=ax_d, alpha=0.5, color='red')
+    bout_pd.groupby(bout_pd['datetime'].dt.date)['bout_auto'].sum().plot(kind='bar', ax=ax_d, alpha=0.5, label='auto')
+    bout_pd.groupby(bout_pd['datetime'].dt.date)['bout_check'].sum().plot(kind='bar', ax=ax_d, alpha=0.5, 
+    color='red', label='curated')
     ax_d.set_xlabel('Day')
     ax_d.set_ylabel('bouts')
+    ax_d.legend()
+    #ax_d.xaxis.set_ticklabels([])
+
+    ax_dl = ax_dict['daily_len']
+    # (bout_pd.groupby(bout_pd['datetime'].dt.date)['len_ms'].sum()/60000).plot(kind='bar', ax=ax_dl, alpha=0.5, 
+    # label='auto')
+    (bout_pd.loc[bout_pd['bout_check']==True, :].groupby(bout_pd.loc[bout_pd['bout_check']==True, 'datetime'].dt.date)['len_ms'].sum()/60000).plot(kind='bar', ax=ax_dl, alpha=0.5, 
+    color='red', label='curated')
+    ax_dl.set_xlabel('Day')
+    ax_dl.set_ylabel('song len (min)')
+    
     
     plt.tight_layout()
     return ax_dict
@@ -659,11 +705,13 @@ def main():
     days_lookup = 2
     do_today = False
     force_compute = False
+    #birds_list = ['s_b1575_23', 's_b1515_23']
+    birds_list = [] #empty list will run through all
 
     get_starlings_alsa_bouts(
-        days_lookup, force=force_compute, do_today=do_today)
+        days_lookup, force=force_compute, do_today=do_today, birds_list=birds_list)
 
-    # get_birds_bouts(['s_b1376_22', 's_b1555_22', 's_b1312_22'], days_lookup, bs.default_hparams,
+    # get_birds_bouts(['s_b1575_23', 's_b1515_23'], days_lookup, bs.default_hparams,
     # ephys_software='alsa',
     # n_jobs=12,
     # force=True,

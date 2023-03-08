@@ -66,7 +66,7 @@ def save_wav(stream: np.array, s_f: np.float, wav_path: str) -> int:
     np.save(npy_path, stream.T)
     return wav_s_f
 
-def chans_to_wav(recording_extractor, chan_list: list, wav_path:str) -> int:
+def chans_to_wav(recording_extractor, chan_list: list, wav_path:str, only_npy: bool=False) -> int:
     # get the stream
     data_stream = recording_extractor.get_traces(channel_ids=chan_list)
     # make sure folder exists
@@ -188,7 +188,7 @@ def sync_all(all_syn_dict: dict, ref_stream: str, force=False) -> dict:
         one_syn_dict['t_p'] = np.load(t_p_path, mmap_mode='r')
     return
 
-def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_stream=None) -> dict:
+def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_stream=None, skip_wav=False) -> dict:
     # get the recordings
     logger.info('PREPROCESSING sess {} | epoch {}'.format(sess_par['sess'], epoch))
     logger.info('getting extractors')
@@ -209,7 +209,7 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_strea
     logger.info('Getting microphone channel(s) {}'.format(mic_list))
     mic_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, mic_list, chan_type='adc')
     mic_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_mic.wav')
-    wav_s_f = wu.save_wav(mic_stream, nidq_s_f, mic_file_path)
+    wav_s_f = wu.save_wav(mic_stream, nidq_s_f, mic_file_path, skip_wav=skip_wav)
 
     ### if there were other adc channels (stim, for instance)
     ### get the stimulus signals to wav
@@ -218,7 +218,7 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_strea
         logger.info('Getting adc channel(s) {}'.format(adc_list))
         adc_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, adc_list, chan_type='adc')
         adc_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_adc.wav')
-        wav_s_f = wu.save_wav(adc_stream, nidq_s_f, adc_file_path)
+        wav_s_f = wu.save_wav(adc_stream, nidq_s_f, adc_file_path, skip_wav=skip_wav)
         adc_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_adc.npy')
         np.save(adc_file_path, adc_stream)
 
@@ -232,7 +232,7 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_strea
 
         stim_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, stim_list, chan_type='adc')
         stim_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_stim.wav')
-        wav_s_f = wu.save_wav(stim_stream, nidq_s_f, stim_file_path)
+        wav_s_f = wu.save_wav(stim_stream, nidq_s_f, stim_file_path, skip_wav=skip_wav)
 
         if 'wav_syn' in stim_list:
             wav_syn_ch_in_stream = np.where(np.array(sess_par['stim_list']) == 'wav_syn')[0][0]
@@ -254,7 +254,7 @@ def preprocess_run(sess_par: dict, exp_struct: dict, epoch:str, do_sync_to_strea
     logger.info('Getting sync channel(s) from nidaq streams: {}'.format(sync_list))
     sync_stream = extract_nidq_channels(sess_par, run_recs_dict, rig_dict, sync_list, chan_type='ttl')  
     sync_file_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_sync.wav')
-    wav_s_f = wu.save_wav(sync_stream, nidq_s_f, sync_file_path)
+    wav_s_f = wu.save_wav(sync_stream, nidq_s_f, sync_file_path, skip_wav=skip_wav)
     
     logger.info('Getting sync events from the wav sync channel')
     sync_ev_path = os.path.join(sgl_exp_struct['folders']['derived'], 'wav_sync_evt.npy')

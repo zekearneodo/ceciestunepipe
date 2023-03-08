@@ -1,11 +1,14 @@
 from builtins import NotImplementedError
 import os
+import shutil
 import socket
 import json
 import logging
 import glob
 import warnings
 import pandas as pd
+
+from ceciestunepipe.util import fileutil as fu
 
 logger = logging.getLogger('ceciestunepipe.file.bcistructure')
 
@@ -271,6 +274,15 @@ def msort_cleanup(exp_struct: dict):
         os.remove(mda_raw_path)
     except FileNotFoundError:
         logger.debug('Nuttin done, file wasnt there')
+
+def save_sort(tmp_loc, sort_folder, exist_ok=False, exclude_list=['*.dat']):
+    ### save all the temp files (except for the heavy ones) to the final dest
+    fu.makedirs(sort_folder)
+    #file_list, exclude_list = fu.glob_except(tmp_loc, exclude_list=exclude_list)
+    logger.info('Copying the temp files from sort in {} to {}'.format(tmp_loc, sort_folder)) 
+    return shutil.copytree(tmp_loc, os.path.split(sort_folder)[0], 
+                    ignore=shutil.ignore_patterns(*exclude_list),
+                    dirs_exist_ok=exist_ok)
 
 def list_subfolders(folder_path):
     return next(os.walk(os.path.abspath(folder_path)))[1]

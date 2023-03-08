@@ -77,7 +77,7 @@ def sync_all(all_syn_dict: dict, ref_stream: str, force=False) -> dict:
         if one_stream==ref_stream:
             continue
             
-        logger.info(' synch {}...'.format(one_stream))
+        logger.info(' sync {}...'.format(one_stream))
         
         t_0_folder = os.path.split(one_syn_dict['t_0_path'])[0]
         t_p_path = os.path.join(t_0_folder, '{}-tp.npy'.format(one_stream))
@@ -225,14 +225,16 @@ def trial_syn_from_pd(bout_pd: pd.DataFrame, all_syn_dict: dict, s_f_key: str='n
     
     # overwrite the start sample with the one that I got from the synpd
     bout_dict, bout_pd = bout_dict_from_pd(bout_pd, all_syn_dict, s_f_key=s_f_key)
+    
     bout_pd['start_sample_' + s_f_key] = start_sample
     bout_dict['start_sample_' + s_f_key] = start_sample
+    # rename start, end to start_sample, end sample, for compatibility with bouts pipeline.
+    bout_pd.rename(columns={'start': 'start_sample', 'end': 'end_sample'}, inplace=True)
     
     bout_dict.update({
             'tag_freq': bout_pd['tag_freq'].values,
             'stim_name': bout_pd['stim_name'].values
            })
-
     return bout_dict, bout_pd
 
 

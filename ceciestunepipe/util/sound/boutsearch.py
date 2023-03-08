@@ -17,6 +17,7 @@ from scipy.io import wavfile
 from tqdm.auto import tqdm
 
 from ceciestunepipe.util import fileutil as fu
+from ceciestunepipe.util import wavutil as wu
 from ceciestunepipe.util.sound import spectral as sp
 from ceciestunepipe.util.sound import temporal as st
 
@@ -33,8 +34,10 @@ def read_wav_chan(wav_path: str, chan_id: int = 0, return_int16=True) -> tuple:
     if return_int16:
         if x.dtype == 'int32':
             y = (x[:, chan_id] >> 16).astype(np.int16)
+            #y = (z/np.max(np.abs(z)) * 32000).astype(np.int16)
         elif x.dtype == 'int16':
             y = x[:, chan_id]
+            #y = (x[:, chan_id]/np.max(np.abs(x[:, chan_id])) * 32000).astype(np.int16)
         else:
             raise NotImplementedError(
                 'wav file is neither int16 nor int32 and I dont know how to convert to int16 yet')
@@ -43,9 +46,26 @@ def read_wav_chan(wav_path: str, chan_id: int = 0, return_int16=True) -> tuple:
 
     return s_f, y
 
+def read_npy_chan(wav_path: str, chan_id: int = 0, return_int16=True) -> tuple:
+    s_f, x = wu.read_wav_chan(wav_path, chan_id=chan_id, skip_wav=True)
+
+    if return_int16:
+        if x.dtype == 'int32':
+            y = (x >> 16).astype(np.int16)
+            #y = (z/np.max(np.abs(z)) * 32000).astype(np.int16)
+        elif x.dtype == 'int16':
+            y = x
+            #y = (x[:, chan_id]/np.max(np.abs(x[:, chan_id])) * 32000).astype(np.int16)
+        else:
+            raise NotImplementedError(
+                'wav file is neither int16 nor int32 and I dont know how to convert to int16 yet')
+    else:
+        y = x
+
+    return s_f, y
 
 def sess_file_id(f_path):
-    n = int(os.path.split(f_path)[1].split('-')[-1].split('.wav')[0])
+    n = int(os.path.split(f_path)[1].split('-')[-1].split('.')[0])
     return n
 
 
@@ -134,6 +154,8 @@ default_hparams = {  # default parameters work well for starling
 
 
 def gimmepower(x, hparams):
+    #x = x/np.max(np.abs(x)) * 32000
+    #y = x.astype(np.int16)
     s = sp.rosa_spectrogram(x.flatten(), hparams)
     f = np.arange(hparams['num_freq']) / \
         hparams['num_freq']*0.5*hparams['sample_rate']
