@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(name='ceciestunepipe',
       version='0.1',
@@ -7,7 +7,7 @@ setup(name='ceciestunepipe',
       author='Zeke Arneodo',
       author_email='ezequiel@ini.ethz.ch',
       license='MIT',
-      packages=['ceciestunepipe'],
+      packages=find_packages(),
       install_requires=['numpy',
                         'matplotlib',
                         'pandas>=0.23',
