@@ -50,6 +50,11 @@ locations_dict['pouli']= {'mnt': os.path.abspath('/mnt/sphere/speech_bci/'),
 #                              'fast': os.path.abspath('/Users/zeke/experiment/scratch')
 #                              }
 
+## Added this to run analyses locally
+locations_dict['jupyter-lostrowski']= {'mnt': os.path.abspath('/net2/expData/birdsong_var/zebra_finch'),
+                             'local': os.path.abspath('/net2/expData/birdsong_var/zebra_finch'),
+                             'fast': os.path.abspath('/net2/expData/birdsong_var/zebra_finch')
+                             }
 
 default_struct_par = {'neural': 'ephys',
                       'presort': 'kwik',  
